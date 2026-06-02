@@ -11,7 +11,7 @@ echo.
 
 REM ---- Step 1: Install Python dependencies ----
 echo [1/3] Installing Python dependencies...
-pip install customtkinter pystray pillow requests packaging pyinstaller httpx ^
+pip install customtkinter pystray pillow requests packaging pyinstaller httpx pdfplumber ^
     --quiet --disable-pip-version-check
 if %errorlevel% neq 0 (
     echo ERROR: pip install failed.

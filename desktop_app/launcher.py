@@ -205,6 +205,9 @@ class ProcessManager:
         # Cache sync — runs on startup and every 24 hours
         self.cache_sync = CacheSyncManager(env=creds)
 
+        # Quote watcher — polls OneDrive inbox every minute
+        self.quote_watcher = QuoteWatcherManager(env=creds)
+
     @property
     def python_ok(self) -> bool:
         # If we found a full absolute path, verify it exists.
@@ -218,6 +221,7 @@ class ProcessManager:
         for p in self._processes:
             p.start()
         self.cache_sync.start()
+        self.quote_watcher.start()
         self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._monitor_thread.start()
 
@@ -321,6 +325,104 @@ class CacheSyncManager:
 
 
 # ---------------------------------------------------------------------------
+# Quote Watcher Manager
+# ---------------------------------------------------------------------------
+
+QUOTE_APP_SCRIPT  = APP_DIR / "quote_app" / "main.py"
+QUOTE_INBOX       = Path(os.environ.get("ONEDRIVE",
+    str(Path.home() / "OneDrive - Denommee Plumbing and Heating")
+)) / "Purchasing" / "Incoming Quotes"
+
+
+class QuoteWatcherManager:
+    """
+    Watches the OneDrive Incoming Quotes folder for new quote files and processes them.
+    Runs as a background thread alongside the MCP services.
+    """
+
+    POLL_SECONDS = 60   # Check every minute
+
+    def __init__(self, env: dict):
+        self.env         = env
+        self.last_processed: Optional[datetime] = None
+        self.is_running  = False
+        self.last_status = "Watching for quotes…"
+        self.last_count  = 0
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self):
+        if not QUOTE_APP_SCRIPT.exists():
+            self.last_status = "quote_app/main.py not found"
+            return
+        QUOTE_INBOX.mkdir(parents=True, exist_ok=True)
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def process_now(self):
+        """Trigger an immediate scan (UI button)."""
+        threading.Thread(target=self._do_scan, daemon=True).start()
+
+    def _loop(self):
+        while True:
+            self._do_scan()
+            time.sleep(self.POLL_SECONDS)
+
+    def _do_scan(self):
+        if self.is_running:
+            return
+        # Check if any files are waiting
+        try:
+            files = [f for f in QUOTE_INBOX.iterdir()
+                     if f.suffix.lower() in {'.pdf', '.csv', '.xlsx'}]
+        except Exception:
+            files = []
+
+        if not files:
+            return   # Nothing to do — silent
+
+        self.is_running  = True
+        self.last_status = f"Processing {len(files)} quote(s)…"
+        log_path = APP_DIR / "quote_processor.log"
+
+        try:
+            env = {**os.environ, **self.env}
+            result = subprocess.run(
+                [str(PYTHON_EXE), str(QUOTE_APP_SCRIPT), "--once"],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+            try:
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(f"\n=== Quote scan {datetime.now().isoformat()} ===\n")
+                    f.write(result.stdout or "")
+                    if result.stderr:
+                        f.write("--- stderr ---\n")
+                        f.write(result.stderr)
+                    f.write(f"Exit: {result.returncode}\n")
+            except OSError:
+                pass
+
+            if result.returncode == 0:
+                self.last_processed = datetime.now()
+                self.last_count     = len(files)
+                self.last_status    = (
+                    f"Last run: {self.last_processed.strftime('%b %d %I:%M %p')} "
+                    f"({self.last_count} file{'s' if self.last_count != 1 else ''})"
+                )
+            else:
+                self.last_status = "Processing failed — check quote_processor.log"
+        except subprocess.TimeoutExpired:
+            self.last_status = "Processing timed out"
+        except Exception as e:
+            self.last_status = f"Error: {e}"
+        finally:
+            self.is_running = False
+
+
+# ---------------------------------------------------------------------------
 # Credentials loader
 # ---------------------------------------------------------------------------
 
@@ -400,6 +502,9 @@ class StatusWindow(ctk.CTk):
         # Cache sync row
         self._cache_row = self._make_service_row(svc_frame, "Cache Sync")
 
+        # Quote watcher row
+        self._quote_row = self._make_service_row(svc_frame, "Quote Watcher")
+
         # Action buttons
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.pack(fill="x", padx=16, pady=4)
@@ -420,6 +525,12 @@ class StatusWindow(ctk.CTk):
             fg_color="#555", hover_color="#666",
             command=self._check_updates)
         self.update_btn.pack(side="left", padx=(0, 6))
+
+        self.quote_btn = ctk.CTkButton(
+            btn_frame, text="⚡ Quotes", width=90,
+            fg_color="#555", hover_color="#666",
+            command=self._process_quotes_now)
+        self.quote_btn.pack(side="left", padx=(0, 6))
 
         self.log_btn = ctk.CTkButton(
             btn_frame, text="📋 Log", width=70,
@@ -497,6 +608,18 @@ class StatusWindow(ctk.CTk):
             self._cache_row["dot"].configure(text_color=GRAY)
             self._cache_row["detail"].configure(text=cs.last_status)
 
+        # Quote watcher row
+        qw = self.proc_manager.quote_watcher
+        if qw.is_running:
+            self._quote_row["dot"].configure(text_color=YELLOW)
+            self._quote_row["detail"].configure(text="Processing…")
+        elif qw.last_processed:
+            self._quote_row["dot"].configure(text_color=GREEN)
+            self._quote_row["detail"].configure(text=qw.last_status)
+        else:
+            self._quote_row["dot"].configure(text_color=GRAY)
+            self._quote_row["detail"].configure(text=qw.last_status)
+
         # Python missing warning
         if not self.proc_manager.python_ok:
             self.status_bar.configure(
@@ -536,6 +659,23 @@ class StatusWindow(ctk.CTk):
             os.startfile(str(log_file))
         else:
             self.status_bar.configure(text="No log file found yet.", text_color=GRAY)
+
+    def _process_quotes_now(self):
+        self.quote_btn.configure(state="disabled", text="Processing…")
+        self.status_bar.configure(text="Scanning quote inbox…", text_color=GRAY)
+        def _do():
+            self.proc_manager.quote_watcher.process_now()
+            time.sleep(0.5)
+            while self.proc_manager.quote_watcher.is_running:
+                time.sleep(0.5)
+            self.after(0, lambda: (
+                self.quote_btn.configure(state="normal", text="⚡ Quotes"),
+                self.status_bar.configure(
+                    text=self.proc_manager.quote_watcher.last_status,
+                    text_color=GREEN,
+                ),
+            ))
+        threading.Thread(target=_do, daemon=True).start()
 
     def _sync_cache_now(self):
         self.sync_btn.configure(state="disabled", text="Syncing…")

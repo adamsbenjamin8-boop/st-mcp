@@ -34,7 +34,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 [Run]
 Filename: "icacls.exe"; Parameters: """{app}"" /grant Users:(OI)(CI)F /T"; Flags: runhidden waituntilterminated
 Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\setup_claude_config.ps1"""; Flags: runhidden waituntilterminated
-Filename: "python.exe"; Parameters: "-m pip install mcp httpx --quiet"; \
+Filename: "python.exe"; Parameters: "-m pip install mcp httpx pdfplumber --quiet"; \
   Description: "Installing Python dependencies"; \
   Flags: runhidden waituntilterminated
 Filename: "{app}\{#AppExeName}"; Description: "Launch ST MCP Connector"; Flags: nowait postinstall skipifsilent
@@ -53,6 +53,23 @@ Source: "..\assets\.env.template";     DestDir: "{app}"; DestName: ".env"; Flags
 
 ; Claude config setup script
 Source: "..\assets\setup_claude_config.ps1"; DestDir: "{app}"; Flags: ignoreversion
+
+; Quote app — processes vendor quotes into ST PO Requests
+Source: "..\..\quote_app\main.py";             DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\config.py";           DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\vendor_router.py";    DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\st_client.py";        DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\teams_notifier.py";   DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\smartsheet_logger.py"; DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\quote_processor.py";  DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\folder_watcher.py";   DestDir: "{app}\quote_app"; Flags: ignoreversion
+
+; Vendor parsers
+Source: "..\..\quote_parsers\__init__.py";     DestDir: "{app}\quote_parsers"; Flags: ignoreversion
+Source: "..\..\quote_parsers\ferguson.py";     DestDir: "{app}\quote_parsers"; Flags: ignoreversion
+Source: "..\..\quote_parsers\johnstone.py";    DestDir: "{app}\quote_parsers"; Flags: ignoreversion
+Source: "..\..\quote_parsers\fwwebb.py";       DestDir: "{app}\quote_parsers"; Flags: ignoreversion
+Source: "..\..\quote_parsers\generic_csv.py";  DestDir: "{app}\quote_parsers"; Flags: ignoreversion
 
 [Icons]
 ; Start menu shortcut

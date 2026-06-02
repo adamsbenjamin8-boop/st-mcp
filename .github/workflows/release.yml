@@ -66,6 +66,19 @@ jobs:
               'servicetitan_writer.py',
               'st_cache_sync.py',
               'desktop_app/version.py',
+              'quote_app/main.py',
+              'quote_app/config.py',
+              'quote_app/vendor_router.py',
+              'quote_app/st_client.py',
+              'quote_app/teams_notifier.py',
+              'quote_app/smartsheet_logger.py',
+              'quote_app/quote_processor.py',
+              'quote_app/folder_watcher.py',
+              'quote_parsers/__init__.py',
+              'quote_parsers/ferguson.py',
+              'quote_parsers/johnstone.py',
+              'quote_parsers/fwwebb.py',
+              'quote_parsers/generic_csv.py',
           ]
           lines = []
           for path in files:
@@ -88,6 +101,19 @@ jobs:
             servicetitan_writer.py
             st_cache_sync.py
             desktop_app/version.py
+            quote_app/main.py
+            quote_app/config.py
+            quote_app/vendor_router.py
+            quote_app/st_client.py
+            quote_app/teams_notifier.py
+            quote_app/smartsheet_logger.py
+            quote_app/quote_processor.py
+            quote_app/folder_watcher.py
+            quote_parsers/__init__.py
+            quote_parsers/ferguson.py
+            quote_parsers/johnstone.py
+            quote_parsers/fwwebb.py
+            quote_parsers/generic_csv.py
             checksums.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
