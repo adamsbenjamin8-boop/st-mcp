@@ -48,8 +48,13 @@ Source: "..\..\servicetitan_writer.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\st_cache_sync.py";       DestDir: "{app}"; Flags: ignoreversion
 Source: "..\version.py";                DestDir: "{app}"; Flags: ignoreversion
 
-; Credentials sidecar — pre-filled with the shared app key
-Source: "..\assets\.env.template";     DestDir: "{app}"; DestName: ".env"; Flags: onlyifdoesntexist
+; Credentials — bundled from the local .env.credentials file (never in git)
+; Falls back to .env.template (placeholders only) if credentials file not found
+#if FileExists("..\assets\.env.credentials")
+Source: "..\assets\.env.credentials"; DestDir: "{app}"; DestName: ".env"; Flags: onlyifdoesntexist
+#else
+Source: "..\assets\.env.template";    DestDir: "{app}"; DestName: ".env"; Flags: onlyifdoesntexist
+#endif
 
 ; Claude config setup script
 Source: "..\assets\setup_claude_config.ps1"; DestDir: "{app}"; Flags: ignoreversion

@@ -1,6 +1,7 @@
 # Credentials — never commit these
 .env
 *.env
+*.credentials
 _version_override.txt
 
 # Python
