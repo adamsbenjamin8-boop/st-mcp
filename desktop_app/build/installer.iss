@@ -30,8 +30,9 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
-; After install: install Python dependencies, then launch the app
+; After install: grant write access, install Python dependencies, then launch the app
 [Run]
+Filename: "icacls.exe"; Parameters: """{app}"" /grant Users:(OI)(CI)F /T"; Flags: runhidden waituntilterminated
 Filename: "python.exe"; Parameters: "-m pip install mcp httpx --quiet"; \
   Description: "Installing Python dependencies"; \
   Flags: runhidden waituntilterminated
@@ -81,10 +82,14 @@ var
   PythonPath: String;
 begin
   // Check registry for Python 3 (64-bit and 32-bit)
-  Result := RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.12\InstallPath', '', PythonPath)
+  Result := RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.14\InstallPath', '', PythonPath)
+         or RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.13\InstallPath', '', PythonPath)
+         or RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.12\InstallPath', '', PythonPath)
          or RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.11\InstallPath', '', PythonPath)
          or RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.10\InstallPath', '', PythonPath)
          or RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.9\InstallPath',  '', PythonPath)
+         or RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.14\InstallPath', '', PythonPath)
+         or RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.13\InstallPath', '', PythonPath)
          or RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.12\InstallPath', '', PythonPath)
          or RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.11\InstallPath', '', PythonPath)
          or RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.10\InstallPath', '', PythonPath)

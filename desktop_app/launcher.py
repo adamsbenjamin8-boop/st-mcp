@@ -162,6 +162,7 @@ class ManagedProcess:
             self._proc = subprocess.Popen(
                 [str(PYTHON_EXE), str(self.script)],
                 env=env,
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
@@ -624,8 +625,7 @@ def _make_icon_image(color: str) -> Image.Image:
     draw = ImageDraw.Draw(img)
     fill = (46, 204, 113) if color == "green" else (231, 76, 60)  # green / red
     draw.ellipse([4, 4, 60, 60], fill=fill)
-    # 'S' for ServiceTitan
-    draw.text((22, 16), "S", fill="white")
+    draw.text((22, 16), "D", fill="white")
     return img
 
 
