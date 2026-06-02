@@ -63,6 +63,8 @@ Source: "..\..\quote_app\teams_notifier.py";   DestDir: "{app}\quote_app"; Flags
 Source: "..\..\quote_app\smartsheet_logger.py"; DestDir: "{app}\quote_app"; Flags: ignoreversion
 Source: "..\..\quote_app\quote_processor.py";  DestDir: "{app}\quote_app"; Flags: ignoreversion
 Source: "..\..\quote_app\folder_watcher.py";   DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\email_monitor.py";   DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\claude_parser.py";  DestDir: "{app}\quote_app"; Flags: ignoreversion
 
 ; Vendor parsers
 Source: "..\..\quote_parsers\__init__.py";     DestDir: "{app}\quote_parsers"; Flags: ignoreversion

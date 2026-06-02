@@ -17,6 +17,7 @@ from typing import Optional
 
 from config import PROCESSED_FOLDER
 from vendor_router import detect_and_parse
+from claude_parser import parse_with_claude
 from st_client import (
     find_vendor_id, find_job_id, get_default_po_type_id,
     create_po_request, add_po_item, get_po_url
@@ -50,18 +51,32 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
         vendor_name, parsed = detect_and_parse(file_path)
 
         if vendor_name is None or parsed is None:
-            # Unknown vendor — log it and return for Claude escalation
-            print(f"  ❌ Unknown vendor format — needs Claude parsing")
-            log_quote(
-                vendor_name="Unknown",
-                filename=path.name,
-                parsed_by="Claude AI",
-                item_count=0,
-                parser_added=False,
-                notes="Unknown vendor format — manual review needed",
-            )
-            result["error"] = "unknown_vendor"
-            return result
+            # Unknown vendor — escalate to Claude API automatically
+            print(f"  🔄 Unknown vendor — trying Claude API fallback…")
+            try:
+                import pdfplumber
+                with pdfplumber.open(file_path) as pdf:
+                    raw_text = "\n".join(p.extract_text() or "" for p in pdf.pages)
+            except Exception:
+                raw_text = ""
+
+            parsed = parse_with_claude(raw_text, path.name)
+            if parsed:
+                vendor_name = parsed.vendor
+                parsed_by_label = "Claude AI"
+            else:
+                log_quote(
+                    vendor_name="Unknown",
+                    filename=path.name,
+                    parsed_by="Claude AI",
+                    item_count=0,
+                    parser_added=False,
+                    notes="Claude API not configured or failed — manual review needed",
+                )
+                result["error"] = "unknown_vendor"
+                return result
+        else:
+            parsed_by_label = "Local Parser"
 
         print(f"  ✓ Vendor: {vendor_name}")
         items = getattr(parsed, 'line_items', [])
@@ -167,9 +182,9 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
         log_quote(
             vendor_name=vendor_name,
             filename=path.name,
-            parsed_by="Local Parser",
+            parsed_by=parsed_by_label,
             item_count=added,
-            parser_added=True,
+            parser_added=(parsed_by_label == "Local Parser"),
         )
 
         # Step 10: Move to Processed folder

@@ -25,10 +25,11 @@ ESTIMATES_EMAIL = "Estimates@denommeeplumbing.com"  # → add to estimate workfl
 # OneDrive folder — Zapier drops incoming quote attachments here
 # Set QUOTES_INBOX_FOLDER to the full path of the folder on this computer.
 # ---------------------------------------------------------------------------
-_onedrive_base = Path(os.environ.get("ONEDRIVE", str(Path.home() / "OneDrive - Denommee Plumbing and Heating")))
-QUOTES_INBOX_FOLDER   = _onedrive_base / "Purchasing" / "Incoming Quotes"
-ESTIMATES_INBOX_FOLDER = _onedrive_base / "Purchasing" / "Incoming Estimates"
-PROCESSED_FOLDER      = _onedrive_base / "Purchasing" / "Processed"
+# Purchasing folders live in Documents so they're easy to find and already OneDrive-synced
+_docs = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Documents"
+QUOTES_INBOX_FOLDER    = _docs / "Purchasing" / "Incoming Quotes"
+ESTIMATES_INBOX_FOLDER = _docs / "Purchasing" / "Incoming Estimates"
+PROCESSED_FOLDER       = _docs / "Purchasing" / "Processed"
 
 # ---------------------------------------------------------------------------
 # Teams — Incoming Webhook URL for Purchasing channel notifications

@@ -208,6 +208,9 @@ class ProcessManager:
         # Quote watcher — polls OneDrive inbox every minute
         self.quote_watcher = QuoteWatcherManager(env=creds)
 
+        # Email monitor — checks orders mailbox every 2 minutes
+        self._email_env = creds
+
     @property
     def python_ok(self) -> bool:
         # If we found a full absolute path, verify it exists.
@@ -222,6 +225,8 @@ class ProcessManager:
             p.start()
         self.cache_sync.start()
         self.quote_watcher.start()
+        # Start email monitor in a background thread via the quote app
+        threading.Thread(target=self._start_email_monitor, daemon=True).start()
         self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._monitor_thread.start()
 
@@ -233,6 +238,25 @@ class ProcessManager:
     def restart_all(self):
         for p in self._processes:
             p.restart()
+
+    def _start_email_monitor(self):
+        """Start the email monitor for the orders mailbox."""
+        try:
+            email_script = APP_DIR / "quote_app" / "email_monitor.py"
+            if not email_script.exists():
+                return
+            env = {**os.environ, **self._email_env}
+            # Run as a persistent subprocess — it loops internally
+            subprocess.Popen(
+                [str(PYTHON_EXE), str(email_script)],
+                env=env,
+                stdout=subprocess.PIPE,
+                stdin=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+        except Exception as e:
+            logging.error(f"Could not start email monitor: {e}")
 
     def _monitor_loop(self):
         """Auto-restart any process that crashes."""
@@ -329,9 +353,7 @@ class CacheSyncManager:
 # ---------------------------------------------------------------------------
 
 QUOTE_APP_SCRIPT  = APP_DIR / "quote_app" / "main.py"
-QUOTE_INBOX       = Path(os.environ.get("ONEDRIVE",
-    str(Path.home() / "OneDrive - Denommee Plumbing and Heating")
-)) / "Purchasing" / "Incoming Quotes"
+QUOTE_INBOX = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Documents" / "Purchasing" / "Incoming Quotes"
 
 
 class QuoteWatcherManager:

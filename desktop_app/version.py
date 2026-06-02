@@ -17,6 +17,8 @@ UPDATE_FILES = [
     "quote_app/smartsheet_logger.py",
     "quote_app/quote_processor.py",
     "quote_app/folder_watcher.py",
+    "quote_app/email_monitor.py",
+    "quote_app/claude_parser.py",
     # Vendor parsers — add new vendors here
     "quote_parsers/__init__.py",
     "quote_parsers/ferguson.py",
