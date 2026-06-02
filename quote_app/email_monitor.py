@@ -152,8 +152,20 @@ class EmailMonitor:
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Factory — reads credentials from environment/.env
 # ---------------------------------------------------------------------------
+def create_monitor() -> EmailMonitor:
+    """Create an EmailMonitor using credentials from environment."""
+    email_addr = os.environ.get("ORDERS_EMAIL_ADDRESS", ORDERS_EMAIL)
+    password   = os.environ.get("ORDERS_EMAIL_PASSWORD", "")
+    return EmailMonitor(
+        email_address=email_addr,
+        password=password,
+        dest_folder=QUOTES_INBOX_FOLDER,
+    )
+
+
 if __name__ == "__main__":
     """Run as a standalone background process."""
     import sys
@@ -187,12 +199,3 @@ if __name__ == "__main__":
         time.sleep(60)
 
 
-def create_monitor() -> EmailMonitor:
-    """Create an EmailMonitor using credentials from environment."""
-    email_addr = os.environ.get("ORDERS_EMAIL_ADDRESS", ORDERS_EMAIL)
-    password   = os.environ.get("ORDERS_EMAIL_PASSWORD", "")
-    return EmailMonitor(
-        email_address=email_addr,
-        password=password,
-        dest_folder=QUOTES_INBOX_FOLDER,
-    )
