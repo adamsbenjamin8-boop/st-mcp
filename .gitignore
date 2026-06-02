@@ -1,0 +1,51 @@
+# Credentials — never commit these
+.env
+*.env
+_version_override.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+/build/
+*.spec.bak
+
+# PyInstaller output
+desktop_app/dist/
+desktop_app/build/Output/
+
+# SQLite cache (machine-specific)
+st_cache.db
+
+# API specs (large, not needed in repo)
+api_specs/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Runtime files (machine-specific)
+st_mcp.lock
+
+# Old workflow location (moved to repo root .github/)
+desktop_app/.github/
+
+# Development / scratch scripts
+add_vendor.py
+copy_specs.py
+f.py
+fix.py
+fix_lookup.py
+fix_mcp.py
+gen.py
+generate_po_pdf.py
+probe.py
+test_ts.py

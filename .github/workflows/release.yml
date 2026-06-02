@@ -1,0 +1,106 @@
+# GitHub Actions — ST MCP Release Workflow
+#
+# How to push a script-only update (most common):
+#   1. Edit servicetitan_writer.py as usual
+#   2. Bump APP_VERSION in desktop_app/version.py
+#   3. Open Command Prompt, run: git tag scripts-v1.0.1 && git push --tags
+#   → Workflow uploads the .py files as release assets
+#   → All installs auto-download on next check (every 4 hrs) or manual "Sync Cache"
+#
+# How to push a full app update (launcher or updater changed):
+#   1. Make changes
+#   2. Bump APP_VERSION in desktop_app/version.py
+#   3. Open Command Prompt, run: git tag v1.1.0 && git push --tags
+#   → Workflow builds a new installer AND uploads .py scripts
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'scripts-v*'
+      - 'app-v*'
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install customtkinter pystray pillow requests packaging pyinstaller httpx
+
+      - name: Build executable (skip for scripts-only tags)
+        if: "!startsWith(github.ref_name, 'scripts-')"
+        run: |
+          cd desktop_app
+          pyinstaller build/st_mcp.spec --clean --noconfirm
+
+      - name: Install Inno Setup (skip for scripts-only tags)
+        if: "!startsWith(github.ref_name, 'scripts-')"
+        run: |
+          choco install innosetup --no-progress -y
+
+      - name: Build installer (skip for scripts-only tags)
+        if: "!startsWith(github.ref_name, 'scripts-')"
+        run: |
+          cd desktop_app/build
+          iscc installer.iss
+
+      - name: Generate SHA256 checksums
+        run: |
+          python -c "
+          import hashlib, pathlib
+          files = [
+              'servicetitan_writer.py',
+              'st_cache_sync.py',
+              'desktop_app/version.py',
+          ]
+          lines = []
+          for path in files:
+              p = pathlib.Path(path)
+              if p.exists():
+                  h = hashlib.sha256(p.read_bytes()).hexdigest()
+                  lines.append(f'{h}  {p.name}')
+          pathlib.Path('checksums.sha256').write_text('\n'.join(lines) + '\n')
+          print('Checksums:')
+          print('\n'.join(lines))
+          "
+
+      - name: Create GitHub Release (scripts-only)
+        if: startsWith(github.ref_name, 'scripts-')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "ST MCP ${{ github.ref_name }}"
+          body: "Automated release from tag ${{ github.ref_name }}"
+          files: |
+            servicetitan_writer.py
+            st_cache_sync.py
+            desktop_app/version.py
+            checksums.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release (full app)
+        if: "!startsWith(github.ref_name, 'scripts-')"
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "ST MCP ${{ github.ref_name }}"
+          body: "Automated release from tag ${{ github.ref_name }}"
+          files: |
+            servicetitan_writer.py
+            st_cache_sync.py
+            desktop_app/version.py
+            desktop_app/build/Output/ST_MCP_Setup.exe
+            checksums.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,109 @@
+; Inno Setup script for ST MCP Desktop App
+; Build with: iscc installer.iss  (from build\ directory)
+; Output: build\Output\ST_MCP_Setup.exe
+
+#define AppName       "ST MCP Connector"
+#define AppVersion    "1.0.0"
+#define AppPublisher  "Denomme & Plumbing"
+#define AppURL        "https://github.com/adamsbenjamin8-boop/st-mcp"
+#define AppExeName    "ST_MCP_Launcher.exe"
+#define AppDirName    "ST_MCP"
+
+[Setup]
+AppId={{B4F2A1C8-3D7E-4F9A-B5C2-8E1D6A3F7B9C}
+AppName={#AppName}
+AppVersion={#AppVersion}
+AppPublisher={#AppPublisher}
+AppPublisherURL={#AppURL}
+AppSupportURL={#AppURL}
+AppUpdatesURL={#AppURL}
+DefaultDirName={autopf}\{#AppDirName}
+DefaultGroupName={#AppName}
+AllowNoIcons=yes
+OutputDir=Output
+OutputBaseFilename=ST_MCP_Setup
+SetupIconFile=
+Compression=lzma2/ultra
+SolidCompression=yes
+WizardStyle=modern
+PrivilegesRequired=admin
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+
+; After install: install Python dependencies, then launch the app
+[Run]
+Filename: "python.exe"; Parameters: "-m pip install mcp httpx --quiet"; \
+  Description: "Installing Python dependencies"; \
+  Flags: runhidden waituntilterminated
+Filename: "{app}\{#AppExeName}"; Description: "Launch ST MCP Connector"; Flags: nowait postinstall skipifsilent
+
+[Files]
+; Main launcher executable (built by PyInstaller)
+Source: "..\dist\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+
+; The MCP script files — these get updated in-place by the auto-updater
+Source: "..\..\servicetitan_writer.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\st_cache_sync.py";       DestDir: "{app}"; Flags: ignoreversion
+Source: "..\version.py";                DestDir: "{app}"; Flags: ignoreversion
+
+; Credentials sidecar — pre-filled with the shared app key
+Source: "..\assets\.env.template";     DestDir: "{app}"; DestName: ".env"; Flags: onlyifdoesntexist
+
+[Icons]
+; Start menu shortcut
+Name: "{group}\{#AppName}";        Filename: "{app}\{#AppExeName}"
+Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
+
+; Desktop shortcut (optional — user can skip)
+Name: "{autodesktop}\{#AppName}";  Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+
+[Dirs]
+; Create the C:\ST\ directory so the cache database has a home on every computer
+Name: "C:\ST"
+
+[Tasks]
+Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
+
+[Registry]
+; Auto-start with Windows (current user, no admin needed)
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
+  ValueType: string; ValueName: "{#AppName}"; \
+  ValueData: """{app}\{#AppExeName}"""; \
+  Flags: uninsdeletevalue
+
+[UninstallRun]
+; Stop the app before uninstalling
+Filename: "taskkill"; Parameters: "/f /im {#AppExeName}"; Flags: runhidden; RunOnceId: "KillApp"
+
+[Code]
+function IsPythonInstalled(): Boolean;
+var
+  PythonPath: String;
+begin
+  // Check registry for Python 3 (64-bit and 32-bit)
+  Result := RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.12\InstallPath', '', PythonPath)
+         or RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.11\InstallPath', '', PythonPath)
+         or RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.10\InstallPath', '', PythonPath)
+         or RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.9\InstallPath',  '', PythonPath)
+         or RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.12\InstallPath', '', PythonPath)
+         or RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.11\InstallPath', '', PythonPath)
+         or RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.10\InstallPath', '', PythonPath)
+         or RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.9\InstallPath',  '', PythonPath);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  if not IsPythonInstalled() then
+  begin
+    MsgBox('Python 3.9 or newer is required to run ST MCP Connector.'
+      + #13#10 + #13#10
+      + 'Please download and install Python from https://python.org/downloads'
+      + #13#10
+      + 'Make sure to check "Add Python to PATH" during installation.'
+      + #13#10 + #13#10
+      + 'After installing Python, run this installer again.',
+      mbError, MB_OK);
+    Result := False;
+  end else
+    Result := True;
+end;

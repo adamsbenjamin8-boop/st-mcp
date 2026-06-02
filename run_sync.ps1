@@ -1,0 +1,5 @@
+﻿$env:ST_CLIENT_ID="cid.hjgexhrgh6wtgsbxj8k2p1leh"
+$env:ST_CLIENT_SECRET="cs1.h7fhi8vwvb28swcx3jj58cbov1vsbvasuag8drrx55wmlms8aq"
+$env:ST_APP_KEY="ak1.w2ugo0fhvb0q8o855dpptfpmw"
+$env:ST_TENANT_ID="1842637205"
+& "C:\Users\Ben\AppData\Local\Python\bin\python.exe" "C:\ST\st_cache_sync.py"
