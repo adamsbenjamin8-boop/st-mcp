@@ -97,17 +97,21 @@ begin
 end;
 
 function InitializeSetup(): Boolean;
+var
+  Answer: Integer;
 begin
   if not IsPythonInstalled() then
   begin
-    MsgBox('Python 3.9 or newer is required to run ST MCP Connector.'
+    Answer := MsgBox('Python 3.9 or newer is required to run ST MCP Connector.'
       + #13#10 + #13#10
-      + 'Please download and install Python from https://python.org/downloads'
+      + 'Click OK to open the Python download page in your browser.'
       + #13#10
       + 'Make sure to check "Add Python to PATH" during installation.'
       + #13#10 + #13#10
       + 'After installing Python, run this installer again.',
-      mbError, MB_OK);
+      mbConfirmation, MB_OKCANCEL);
+    if Answer = IDOK then
+      ShellExec('open', 'https://www.python.org/downloads/', '', '', SW_SHOWNORMAL, ewNoWait, Answer);
     Result := False;
   end else
     Result := True;
