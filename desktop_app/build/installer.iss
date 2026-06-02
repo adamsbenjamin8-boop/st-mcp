@@ -33,6 +33,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; After install: grant write access, install Python dependencies, then launch the app
 [Run]
 Filename: "icacls.exe"; Parameters: """{app}"" /grant Users:(OI)(CI)F /T"; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\setup_claude_config.ps1"""; Flags: runhidden waituntilterminated
 Filename: "python.exe"; Parameters: "-m pip install mcp httpx --quiet"; \
   Description: "Installing Python dependencies"; \
   Flags: runhidden waituntilterminated
@@ -49,6 +50,9 @@ Source: "..\version.py";                DestDir: "{app}"; Flags: ignoreversion
 
 ; Credentials sidecar — pre-filled with the shared app key
 Source: "..\assets\.env.template";     DestDir: "{app}"; DestName: ".env"; Flags: onlyifdoesntexist
+
+; Claude config setup script
+Source: "..\assets\setup_claude_config.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; Start menu shortcut
