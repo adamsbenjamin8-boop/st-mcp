@@ -19,6 +19,7 @@ UPDATE_FILES = [
     "quote_app/folder_watcher.py",
     "quote_app/email_monitor.py",
     "quote_app/claude_parser.py",
+    "quote_app/approved_senders.py",
     # Vendor parsers — add new vendors here
     "quote_parsers/__init__.py",
     "quote_parsers/ferguson.py",
@@ -26,3 +27,4 @@ UPDATE_FILES = [
     "quote_parsers/fwwebb.py",
     "quote_parsers/generic_csv.py",
 ]
+
