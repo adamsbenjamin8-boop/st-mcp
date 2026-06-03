@@ -244,15 +244,24 @@ class ProcessManager:
         try:
             email_script = APP_DIR / "quote_app" / "email_monitor.py"
             if not email_script.exists():
+                logging.error("email_monitor.py not found — email monitoring disabled")
                 return
             env = {**os.environ, **self._email_env}
+            if not env.get("ORDERS_EMAIL_PASSWORD"):
+                logging.error("ORDERS_EMAIL_PASSWORD not set — email monitor not starting")
+                return
+            # Log to file so failures are visible
+            log_path = APP_DIR / "email_monitor.log"
+            log_file = open(log_path, "a", encoding="utf-8")
+            log_file.write(f"\n=== Email monitor started {datetime.now().isoformat()} ===\n")
+            log_file.flush()
             # Run as a persistent subprocess — it loops internally
             subprocess.Popen(
                 [str(PYTHON_EXE), str(email_script)],
                 env=env,
-                stdout=subprocess.PIPE,
+                stdout=log_file,
+                stderr=log_file,
                 stdin=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             )
         except Exception as e:
@@ -450,21 +459,26 @@ class QuoteWatcherManager:
 
 def _load_credentials() -> dict:
     """
-    Returns the ST env-var dict.
+    Returns all env-var credentials needed by sub-processes.
     Priority: OS environment vars → APP_DIR/.env sidecar file.
     """
-    keys = ["ST_CLIENT_ID", "ST_CLIENT_SECRET", "ST_APP_KEY", "ST_TENANT_ID"]
+    keys = [
+        "ST_CLIENT_ID", "ST_CLIENT_SECRET", "ST_APP_KEY", "ST_TENANT_ID",
+        "ORDERS_EMAIL_ADDRESS", "ORDERS_EMAIL_PASSWORD",
+        "SMARTSHEET_API_KEY", "ANTHROPIC_API_KEY", "TEAMS_PURCHASING_WEBHOOK",
+    ]
+    # Start with OS environment
     creds = {k: os.environ.get(k, "") for k in keys}
-
-    if not all(creds.values()):
-        env_file = APP_DIR / ".env"
-        if env_file.exists():
-            for line in env_file.read_text().splitlines():
-                line = line.strip()
-                if "=" in line and not line.startswith("#"):
-                    k, _, v = line.partition("=")
-                    creds[k.strip()] = v.strip()
-
+    # Always overlay with .env file so local installs pick up all credentials
+    env_file = APP_DIR / ".env"
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                k, _, v = line.partition("=")
+                k = k.strip()
+                if k in keys:
+                    creds[k] = v.strip()
     return {k: v for k, v in creds.items() if v}
 
 
