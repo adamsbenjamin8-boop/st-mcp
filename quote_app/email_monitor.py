@@ -18,6 +18,10 @@ from pathlib import Path
 from typing import Optional
 
 from config import QUOTES_INBOX_FOLDER, ORDERS_EMAIL
+from approved_senders import (
+    is_approved, get_domain, queue_for_approval,
+    process_approval_email, sync_from_smartsheet
+)
 
 # ---------------------------------------------------------------------------
 # IMAP settings for Microsoft 365
@@ -59,6 +63,8 @@ class EmailMonitor:
         threading.Thread(target=self._do_check, daemon=True).start()
 
     def _loop(self):
+        # Sync approved senders on first start
+        sync_from_smartsheet()
         while True:
             self._do_check()
             time.sleep(POLL_SECONDS)
@@ -108,7 +114,50 @@ class EmailMonitor:
                     subject = msg.get("Subject", "")
                     date    = msg.get("Date", "")
 
-                    # Walk attachments
+                    # Check for vendor approval confirmation first
+                    if process_approval_email(subject):
+                        mail.store(msg_id, "+FLAGS", "\\Seen")
+                        continue
+
+                    # Enforce sender allowlist
+                    sender_domain = get_domain(sender)
+                    if not is_approved(sender_domain):
+                        print(f"  🔒 Unknown sender: {sender} — queuing for approval")
+                        # Extract vendor name from sender display name if possible
+                        vendor_name = sender.split("<")[0].strip().strip('"') or sender_domain
+                        # Look up ST vendor ID
+                        st_vendor_id = ""
+                        try:
+                            from st_client import find_vendor_id
+                            vid = find_vendor_id(vendor_name)
+                            if vid:
+                                st_vendor_id = str(vid)
+                        except Exception:
+                            pass
+                        queue_for_approval(
+                            vendor_name=vendor_name,
+                            email_domain=sender_domain,
+                            st_vendor_id=st_vendor_id,
+                            sender_email=sender,
+                            notes=f"Subject: {subject}",
+                        )
+                        # Move to Quarantine instead of processing
+                        quarantine = self.dest_folder.parent / "Quarantine"
+                        quarantine.mkdir(parents=True, exist_ok=True)
+                        # Save attachment to Quarantine
+                        for part in msg.walk():
+                            if part.get("Content-Disposition") is None:
+                                continue
+                            filename = part.get_filename()
+                            if filename:
+                                data = part.get_payload(decode=True)
+                                if data:
+                                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                    (quarantine / f"{ts}_{filename}").write_bytes(data)
+                        mail.store(msg_id, "+FLAGS", "\\Seen")
+                        continue
+
+                    # Walk attachments (approved sender)
                     for part in msg.walk():
                         if part.get_content_maintype() == "multipart":
                             continue
