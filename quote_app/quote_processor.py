@@ -1,78 +1,59 @@
 """
-Quote Processor — main orchestration logic.
-Processes a single quote file end-to-end:
-  1. Detect vendor + parse
-  2. Match job in ServiceTitan
-  3. Create PO Request with all line items
-  4. Send Teams notification
-  5. Log to Smartsheet
-  6. Move file to Processed folder
+Quote Processor — orchestrates quote → PO workflow.
 """
-
+import re
+import json
 import shutil
 import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-
 from config import PROCESSED_FOLDER
 from vendor_router import detect_and_parse
 from claude_parser import parse_with_claude
 from st_client import (
     find_vendor_id, find_job_id, get_default_po_type_id,
-    create_po_request, add_po_item, get_po_url
+    create_po_with_items, add_items_to_existing_po,
+    find_existing_po_on_job, get_po_display_number, get_po_url,
+    extract_job_reference,
+    DEFAULT_JOB_ID, DEFAULT_BUSINESS_UNIT_ID,
 )
 from teams_notifier import send_po_notification
-from smartsheet_logger import log_quote
-
+from smartsheet_logger import log_quote, log_missing_parts, log_unknown_vendor
 
 def process_quote_file(file_path: str, workflow: str = "po") -> dict:
-    """
-    Process a single quote file.
-    workflow: "po" (create PO) or "estimate" (add to estimate — future)
-    Returns dict with success status and details.
-    """
     path = Path(file_path)
-    result = {
-        "file": path.name,
-        "success": False,
-        "vendor": None,
-        "po_id": None,
-        "item_count": 0,
-        "error": None,
-    }
+    result = {"file": path.name, "success": False, "vendor": None,
+              "po_id": None, "item_count": 0, "error": None}
 
     print(f"\n{'='*60}")
     print(f"Processing: {path.name}")
     print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
+    meta          = _load_meta(path)
+    email_subject = meta.get("subject", "")
+    email_body    = meta.get("body", "")
+    email_sender  = meta.get("sender", "")
+
     try:
         # Step 1: Detect vendor and parse
         vendor_name, parsed = detect_and_parse(file_path)
-
         if vendor_name is None or parsed is None:
-            # Unknown vendor — escalate to Claude API automatically
-            print(f"  🔄 Unknown vendor — trying Claude API fallback…")
+            print(f"  ⚠ Unknown vendor — trying Claude API fallback…")
             try:
                 import pdfplumber
                 with pdfplumber.open(file_path) as pdf:
                     raw_text = "\n".join(p.extract_text() or "" for p in pdf.pages)
             except Exception:
                 raw_text = ""
-
             parsed = parse_with_claude(raw_text, path.name)
             if parsed:
-                vendor_name = parsed.vendor
+                vendor_name    = parsed.vendor
                 parsed_by_label = "Claude AI"
             else:
-                log_quote(
-                    vendor_name="Unknown",
-                    filename=path.name,
-                    parsed_by="Claude AI",
-                    item_count=0,
-                    parser_added=False,
-                    notes="Claude API not configured or failed — manual review needed",
-                )
+                log_quote(vendor_name="Unknown", filename=path.name, parsed_by="Claude AI",
+                          item_count=0, parser_added=False,
+                          notes="Claude API failed — manual review needed")
                 result["error"] = "unknown_vendor"
                 return result
         else:
@@ -80,7 +61,7 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
 
         print(f"  ✓ Vendor: {vendor_name}")
         items = getattr(parsed, 'line_items', [])
-        result["vendor"] = vendor_name
+        result["vendor"]     = vendor_name
         result["item_count"] = len(items)
 
         if not items:
@@ -90,108 +71,152 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
 
         print(f"  ✓ {len(items)} line items extracted")
 
-        # Step 2: Get job reference from quote
-        job_name = getattr(parsed, 'job_name', '') or getattr(parsed, 'cust_po', '') or ''
-        po_ref   = getattr(parsed, 'cust_po', '') or getattr(parsed, 'bid_no', '') or getattr(parsed, 'quote_no', '')
+        # Step 2: Vendor lookup (3-tier)
+        vendor_id, vendor_st_name, vendor_exact = find_vendor_id(vendor_name)
+        if vendor_exact:
+            print(f"  ✓ Vendor matched: {vendor_st_name}")
+        elif vendor_id != 474:
+            print(f"  ⚠  Vendor partially matched as '{vendor_st_name}' — verify before approving")
+            log_unknown_vendor(
+                vendor_name=vendor_name,
+                vendor_type="Unknown Vendor Name",
+                email_domain="",
+                vendor_contact_email=email_sender,
+            )
+        else:
+            print(f"  ⚠  Vendor not matched — using Default Replenishment Vendor")
+            log_unknown_vendor(
+                vendor_name=vendor_name,
+                vendor_type="Unknown Vendor Name",
+                email_domain="",
+                vendor_contact_email=email_sender,
+            )
 
-        # Step 3: Look up vendor ID in ServiceTitan
-        vendor_id = find_vendor_id(vendor_name)
-        if not vendor_id:
-            print(f"  ⚠  Vendor '{vendor_name}' not found in ServiceTitan — using None")
+        # Step 3: Extract job reference from all sources
+        pdf_text = _extract_pdf_text(file_path)
+        job_ref  = (
+            getattr(parsed, 'job_name', '')    or
+            getattr(parsed, 'cust_po', '')     or
+            extract_job_reference(email_subject) or
+            extract_job_reference(email_body)    or
+            extract_job_reference(pdf_text)      or ''
+        )
+        po_ref = (getattr(parsed, 'cust_po', '') or
+                  getattr(parsed, 'bid_no', '')  or
+                  getattr(parsed, 'quote_no', '') or '')
 
-        # Step 4: Try to match job
-        job = None
-        if job_name and job_name.lower() not in ('test', ''):
-            job = find_job_id(job_name)
+        # Step 4: Match job
+        job               = None
+        using_default_job = False
+        if job_ref and job_ref.lower() not in ('test', ''):
+            job = find_job_id(job_ref)
             if job:
                 print(f"  ✓ Job matched: #{job['jobNumber']} — {job['customerName']}")
             else:
-                print(f"  ⚠  Job '{job_name}' not matched — PO will be unassigned")
+                print(f"  ⚠  Job '{job_ref}' not found — using default job")
 
-        # Step 5: Get PO type
-        po_type_id = get_default_po_type_id()
+        if not job:
+            using_default_job = True
+            job = {"id": DEFAULT_JOB_ID, "jobNumber": str(DEFAULT_JOB_ID),
+                   "customerName": "Default", "businessUnitId": DEFAULT_BUSINESS_UNIT_ID}
+            print(f"  → Default job #{DEFAULT_JOB_ID}")
 
-        # Build memo for PO
+        job_id    = job["id"]
+        job_bu_id = job.get("businessUnitId") if not using_default_job else DEFAULT_BUSINESS_UNIT_ID
+        po_type   = get_default_po_type_id()
+
+        # Build memo
         memo_parts = []
         if po_ref:
             memo_parts.append(f"Quote Ref: {po_ref}")
-        if job_name and not job:
-            memo_parts.append(f"Job reference on quote: {job_name} — please assign job before approving")
+        if job_ref and using_default_job:
+            memo_parts.append(f"Job ref on quote: {job_ref} — assign before approving")
+        if email_sender:
+            memo_parts.append(f"From: {email_sender}")
         memo = " | ".join(memo_parts)
 
-        # Step 6: Create PO Request
-        if not vendor_id or not po_type_id:
-            note = f"Missing: {'vendor_id' if not vendor_id else ''} {'po_type_id' if not po_type_id else ''}"
-            print(f"  ❌ Cannot create PO — {note}")
-            result["error"] = note
-            return result
-
-        po = create_po_request(
-            vendor_id=vendor_id,
-            job_id=job["id"] if job else None,
-            po_type_id=po_type_id,
-            memo=memo,
-        )
-
-        if not po or "id" not in po:
-            print(f"  ❌ PO creation failed")
-            result["error"] = "po_creation_failed"
-            return result
-
-        po_id = po["id"]
-        result["po_id"] = po_id
-        print(f"  ✓ PO created: ID {po_id}")
-
-        # Step 7: Add line items
-        added = 0
+        # Step 5: Build line items
+        line_items = []
         for item in items:
-            # Build ST item dict
-            desc      = getattr(item, 'description', '') or str(item)
-            qty       = getattr(item, 'qty', 1)
-            unit_price = getattr(item, 'unit_price', 0.0)
-            part_no   = (getattr(item, 'part_no', '') or
-                         getattr(item, 'vendor_part_no', '') or
-                         getattr(item, 'vendor_code', '') or
-                         getattr(item, 'mfr_code', ''))
-
-            success = add_po_item(po_id, {
-                "description":      desc,
-                "quantity":         qty,
-                "unitCost":         unit_price,
-                "vendorPartNumber": part_no,
+            line_items.append({
+                "description": getattr(item, 'description', '') or str(item),
+                "qty":         getattr(item, 'qty', 1),
+                "unit_price":  getattr(item, 'unit_price', 0.0),
+                "part_no":     (getattr(item, 'part_no', '')        or
+                                getattr(item, 'vendor_part_no', '')  or
+                                getattr(item, 'vendor_code', '')     or
+                                getattr(item, 'mfr_code', '')        or ''),
             })
-            if success:
-                added += 1
 
-        print(f"  ✓ {added}/{len(items)} items added to PO")
+        # Step 6: Add to existing PO or create new
+        existing_po = find_existing_po_on_job(job_id, vendor_id) if not using_default_job else None
+        if existing_po:
+            print(f"  ✓ Found existing PO #{existing_po['number']} — adding items")
+            added, unmatched = add_items_to_existing_po(existing_po["id"], line_items)
+            po_id     = existing_po["id"]
+            po_number = existing_po["number"]
+            print(f"  ✓ Added {added} items to PO #{po_number}")
+        else:
+            po_id, unmatched = create_po_with_items(
+                vendor_id=vendor_id, job_id=job_id, po_type_id=po_type,
+                line_items=line_items, memo=memo, business_unit_id=job_bu_id,
+            )
+            if not po_id:
+                print(f"  ❌ PO creation failed")
+                result["error"] = "po_creation_failed"
+                return result
+            po_number = get_po_display_number(po_id)
+            print(f"  ✓ PO created: #{po_number} with {len(line_items)} items")
 
-        # Step 8: Send Teams notification
-        total = getattr(parsed, 'net_total', 0.0) or getattr(parsed, 'total', 0.0) or getattr(parsed, 'amount_due', 0.0)
-        teams_note = memo if (job_name and not job) else ""
-        send_po_notification(
+        result["po_id"] = po_id
+
+        # Step 7: Log unmatched items
+        if unmatched:
+            print(f"  ⚠  {len(unmatched)} items used HMIL fallback")
+            try:
+                log_missing_parts(vendor=vendor_st_name, po_id=po_id,
+                                  filename=path.name, items=unmatched)
+                print(f"  ✓ Missing parts logged")
+            except Exception as e:
+                print(f"  ⚠  Could not log missing parts: {e}")
+
+        # Step 8: Teams notification
+        total = (getattr(parsed, 'net_total', 0.0) or
+                 getattr(parsed, 'total', 0.0)     or
+                 getattr(parsed, 'amount_due', 0.0))
+        teams_notes = memo if using_default_job and job_ref else ""
+        sent = send_po_notification(
             vendor=vendor_name,
+            vendor_matched=vendor_exact,
+            vendor_st_name=vendor_st_name,
             total=total,
-            job_name=job_name or "Not specified",
+            job_name=f"#{job['jobNumber']}" if not using_default_job else "Default (unassigned)",
             po_id=po_id,
-            item_count=added,
-            notes=teams_note,
+            po_number=po_number,
+            item_count=len(line_items),
+            notes=teams_notes,
+            unmatched_count=len(unmatched),
         )
-        print(f"  ✓ Teams notification sent")
+        print(f"  {'✓' if sent else '❌'} Teams notification {'sent' if sent else 'failed'}")
 
-        # Step 9: Log to Smartsheet
-        log_quote(
-            vendor_name=vendor_name,
-            filename=path.name,
-            parsed_by=parsed_by_label,
-            item_count=added,
-            parser_added=(parsed_by_label == "Local Parser"),
-        )
+        # Step 9: Quote Parser Log
+        log_quote(vendor_name=vendor_st_name, filename=path.name,
+                  parsed_by=parsed_by_label, item_count=len(line_items),
+                  parser_added=(parsed_by_label == "Local Parser"))
 
-        # Step 10: Move to Processed folder
-        _move_to_processed(path)
+        # Step 10: Move to Processed with new naming
+        _move_to_processed(path, vendor_st_name, po_ref or path.stem, po_number)
+
+        # Clean up meta sidecar
+        meta_path = path.with_suffix('.meta.json')
+        if meta_path.exists():
+            try:
+                meta_path.unlink()
+            except Exception:
+                pass
 
         result["success"] = True
-        print(f"  ✅ Done — PO #{po_id}: {get_po_url(po_id)}")
+        print(f"  ✓ Done — PO #{po_number}: {get_po_url(po_id)}")
 
     except Exception as e:
         result["error"] = str(e)
@@ -201,14 +226,38 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
     return result
 
 
-def _move_to_processed(path: Path):
-    """Move a processed file to the Processed folder."""
+def _load_meta(path: Path) -> dict:
+    meta_path = path.with_suffix('.meta.json')
+    if meta_path.exists():
+        try:
+            return json.loads(meta_path.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    return {}
+
+
+def _extract_pdf_text(file_path: str) -> str:
+    try:
+        import pdfplumber
+        with pdfplumber.open(file_path) as pdf:
+            return "\n".join(p.extract_text() or "" for p in pdf.pages)
+    except Exception:
+        return ""
+
+
+def _move_to_processed(path: Path, vendor_name: str, quote_ref: str, po_number: str):
+    """Naming: VendorName_QuoteRef_Date_PONumber.pdf"""
     try:
         dest_dir = Path(PROCESSED_FOLDER)
         dest_dir.mkdir(parents=True, exist_ok=True)
-        # Add timestamp to avoid collisions
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dest = dest_dir / f"{path.stem}_{ts}{path.suffix}"
+
+        safe = lambda s, n: re.sub(r'[^\w-]', '_', s.strip())[:n]
+        name = (f"{safe(vendor_name, 25)}_{safe(quote_ref, 20)}_"
+                f"{datetime.now().strftime('%Y%m%d')}_{safe(po_number, 20)}{path.suffix}")
+        dest = dest_dir / name
+        if dest.exists():
+            dest = dest_dir / name.replace(path.suffix, f"_{datetime.now().strftime('%H%M%S')}{path.suffix}")
+
         shutil.move(str(path), str(dest))
     except Exception as e:
         print(f"  ⚠  Could not move file to Processed: {e}")
