@@ -8,13 +8,14 @@ from datetime import date
 from pathlib import Path
 from typing import List
 
+
 def _load_env():
     env_file = Path("C:/Program Files/ST_MCP/.env")
     if env_file.exists():
         for line in env_file.read_text().splitlines():
             if "=" in line and not line.startswith("#"):
                 k, _, v = line.partition("=")
-                os.environ.setdefault(k.strip(), v.strip())
+                os.environ[k.strip()] = v.strip()  # direct override
 
 _load_env()
 
@@ -76,7 +77,7 @@ def _add_rows(sheet_id: int, rows: list) -> bool:
         resp = httpx.post(
             f"https://api.smartsheet.com/2.0/sheets/{sheet_id}/rows",
             headers=_ss_headers(),
-            json={"rows": rows},
+            json=rows,  # bare array — Smartsheet API requires [row, row, ...] not {"rows": [...]}
             timeout=15,
         )
         resp.raise_for_status()
@@ -145,18 +146,11 @@ def log_unknown_vendor(
     vendor_contact_email: str = "",
     notes: str = "",
 ) -> bool:
-    """
-    Logs unknown vendors/senders to Approved Vendor Emails sheet.
-    vendor_type must be one of:
-      'Unknown Email Sender'
-      'Unknown Vendor Name'
-      'Unknown Email Sender - Vendor'
-    """
     cells = [
-        {"columnId": AV_COL_VENDOR_NAME,    "value": vendor_name},
-        {"columnId": AV_COL_TYPE,           "value": vendor_type},
-        {"columnId": AV_COL_STATUS,         "value": "Pending Approval"},
-        {"columnId": AV_COL_DATE_ADDED,     "value": date.today().isoformat()},
+        {"columnId": AV_COL_VENDOR_NAME, "value": vendor_name},
+        {"columnId": AV_COL_TYPE,        "value": vendor_type},
+        {"columnId": AV_COL_STATUS,      "value": "Pending Approval"},
+        {"columnId": AV_COL_DATE_ADDED,  "value": date.today().isoformat()},
     ]
     if email_domain:
         cells.append({"columnId": AV_COL_EMAIL_DOMAIN, "value": email_domain})
@@ -164,5 +158,4 @@ def log_unknown_vendor(
         cells.append({"columnId": AV_COL_VENDOR_CONTACT, "value": vendor_contact_email})
     if notes:
         cells.append({"columnId": AV_COL_NOTES, "value": notes})
-
     return _add_rows(APPROVED_VENDOR_SHEET, [{"cells": cells, "toBottom": True}])

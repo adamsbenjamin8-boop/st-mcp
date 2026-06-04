@@ -48,7 +48,7 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
                 raw_text = ""
             parsed = parse_with_claude(raw_text, path.name)
             if parsed:
-                vendor_name    = parsed.vendor
+                vendor_name     = parsed.vendor
                 parsed_by_label = "Claude AI"
             else:
                 log_quote(vendor_name="Unknown", filename=path.name, parsed_by="Claude AI",
@@ -77,26 +77,18 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
             print(f"  ✓ Vendor matched: {vendor_st_name}")
         elif vendor_id != 474:
             print(f"  ⚠  Vendor partially matched as '{vendor_st_name}' — verify before approving")
-            log_unknown_vendor(
-                vendor_name=vendor_name,
-                vendor_type="Unknown Vendor Name",
-                email_domain="",
-                vendor_contact_email=email_sender,
-            )
+            log_unknown_vendor(vendor_name=vendor_name, vendor_type="Unknown Vendor Name",
+                               email_domain="", vendor_contact_email=email_sender)
         else:
             print(f"  ⚠  Vendor not matched — using Default Replenishment Vendor")
-            log_unknown_vendor(
-                vendor_name=vendor_name,
-                vendor_type="Unknown Vendor Name",
-                email_domain="",
-                vendor_contact_email=email_sender,
-            )
+            log_unknown_vendor(vendor_name=vendor_name, vendor_type="Unknown Vendor Name",
+                               email_domain="", vendor_contact_email=email_sender)
 
-        # Step 3: Extract job reference from all sources
+        # Step 3: Extract job reference — numeric only
         pdf_text = _extract_pdf_text(file_path)
         job_ref  = (
-            getattr(parsed, 'job_name', '')    or
-            getattr(parsed, 'cust_po', '')     or
+            getattr(parsed, 'job_name', '')      or
+            getattr(parsed, 'cust_po', '')       or
             extract_job_reference(email_subject) or
             extract_job_reference(email_body)    or
             extract_job_reference(pdf_text)      or ''
@@ -105,10 +97,10 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
                   getattr(parsed, 'bid_no', '')  or
                   getattr(parsed, 'quote_no', '') or '')
 
-        # Step 4: Match job
+        # Step 4: Match job — only on numeric job numbers
         job               = None
         using_default_job = False
-        if job_ref and job_ref.lower() not in ('test', ''):
+        if job_ref and job_ref.lower() not in ('test', '') and job_ref.strip().isdigit():
             job = find_job_id(job_ref)
             if job:
                 print(f"  ✓ Job matched: #{job['jobNumber']} — {job['customerName']}")
@@ -142,21 +134,30 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
                 "description": getattr(item, 'description', '') or str(item),
                 "qty":         getattr(item, 'qty', 1),
                 "unit_price":  getattr(item, 'unit_price', 0.0),
-                "part_no":     (getattr(item, 'part_no', '')        or
-                                getattr(item, 'vendor_part_no', '')  or
-                                getattr(item, 'vendor_code', '')     or
-                                getattr(item, 'mfr_code', '')        or ''),
+                "part_no":     (getattr(item, 'part_no', '')       or
+                                getattr(item, 'vendor_part_no', '') or
+                                getattr(item, 'vendor_code', '')    or
+                                getattr(item, 'mfr_code', '')       or ''),
             })
 
         # Step 6: Add to existing PO or create new
         existing_po = find_existing_po_on_job(job_id, vendor_id) if not using_default_job else None
+        po_id       = None
+        po_number   = ""
+        unmatched   = []
+
         if existing_po:
             print(f"  ✓ Found existing PO #{existing_po['number']} — adding items")
             added, unmatched = add_items_to_existing_po(existing_po["id"], line_items)
-            po_id     = existing_po["id"]
-            po_number = existing_po["number"]
-            print(f"  ✓ Added {added} items to PO #{po_number}")
-        else:
+            if added > 0:
+                po_id     = existing_po["id"]
+                po_number = existing_po["number"]
+                print(f"  ✓ Added {added} items to PO #{po_number}")
+            else:
+                print(f"  ⚠ Could not add to existing PO — creating new PO")
+                existing_po = None
+
+        if not existing_po:
             po_id, unmatched = create_po_with_items(
                 vendor_id=vendor_id, job_id=job_id, po_type_id=po_type,
                 line_items=line_items, memo=memo, business_unit_id=job_bu_id,
@@ -204,7 +205,7 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
                   parsed_by=parsed_by_label, item_count=len(line_items),
                   parser_added=(parsed_by_label == "Local Parser"))
 
-        # Step 10: Move to Processed with new naming
+        # Step 10: Move to Processed
         _move_to_processed(path, vendor_st_name, po_ref or path.stem, po_number)
 
         # Clean up meta sidecar
@@ -250,14 +251,13 @@ def _move_to_processed(path: Path, vendor_name: str, quote_ref: str, po_number: 
     try:
         dest_dir = Path(PROCESSED_FOLDER)
         dest_dir.mkdir(parents=True, exist_ok=True)
-
         safe = lambda s, n: re.sub(r'[^\w-]', '_', s.strip())[:n]
         name = (f"{safe(vendor_name, 25)}_{safe(quote_ref, 20)}_"
                 f"{datetime.now().strftime('%Y%m%d')}_{safe(po_number, 20)}{path.suffix}")
         dest = dest_dir / name
         if dest.exists():
-            dest = dest_dir / name.replace(path.suffix, f"_{datetime.now().strftime('%H%M%S')}{path.suffix}")
-
+            dest = dest_dir / name.replace(
+                path.suffix, f"_{datetime.now().strftime('%H%M%S')}{path.suffix}")
         shutil.move(str(path), str(dest))
     except Exception as e:
         print(f"  ⚠  Could not move file to Processed: {e}")

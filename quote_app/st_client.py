@@ -34,19 +34,19 @@ DB_PATH             = "C:/ST/st_cache.db"
 VENDOR_MAPPING_PATH = Path("C:/Program Files/ST_MCP/vendor_mapping.json")
 
 # Approved Vendor Emails sheet — column IDs
-APPROVED_SHEET_ID       = 1832230987976580
-COL_VENDOR_NAME         = 1191779545419652
-COL_EMAIL_DOMAIN        = 5695379172790148
-COL_VENDOR_CONTACT      = 6588800351637380
-COL_ST_VENDOR_ID        = 3443579359104900
-COL_APPROVAL_TOKEN      = 7947178986475396
-COL_APPROVED_BY         = 5132429219368836
-COL_DATE_ADDED          = 2880629405683588
-COL_DATE_APPROVED       = 7384229033054084
-COL_STATUS              = 628829591998340
-COL_NOTES               = 1754729498840964
-COL_TYPE                = 2025839024967556
-COL_ST_VENDOR_NAME      = 5030097781559172
+APPROVED_SHEET_ID  = 1832230987976580
+COL_VENDOR_NAME    = 1191779545419652
+COL_EMAIL_DOMAIN   = 5695379172790148
+COL_VENDOR_CONTACT = 6588800351637380
+COL_ST_VENDOR_ID   = 3443579359104900
+COL_APPROVAL_TOKEN = 7947178986475396
+COL_APPROVED_BY    = 5132429219368836
+COL_DATE_ADDED     = 2880629405683588
+COL_DATE_APPROVED  = 7384229033054084
+COL_STATUS         = 628829591998340
+COL_NOTES          = 1754729498840964
+COL_TYPE           = 2025839024967556
+COL_ST_VENDOR_NAME = 5030097781559172
 
 # ---------------------------------------------------------------------------
 # Known vendor keywords loaded from ST cache at startup
@@ -81,7 +81,6 @@ def _load_user_vendor_map() -> dict:
     return {}
 
 def save_vendor_mapping(quote_name: str, st_vendor_name: str):
-    """Save vendor mapping from Smartsheet approval email."""
     try:
         conn = sqlite3.connect(DB_PATH)
         rows = conn.execute(
@@ -165,27 +164,16 @@ def _post(path_api: tuple, body: dict) -> dict:
 # Vendor lookup — 3-tier
 # ---------------------------------------------------------------------------
 def find_vendor_id(vendor_name: str) -> Tuple[int, str, bool]:
-    """
-    Returns (vendor_id, st_vendor_name, is_confident_match)
-    Tier 1: Known hard-coded vendors
-    Tier 2: User-approved mappings from vendor_mapping.json
-    Tier 3: Cache fuzzy search
-    Fallback: Default Replenishment Vendor
-    """
     if not vendor_name:
         return DEFAULT_VENDOR_ID, "Default Replenishment Vendor", False
-
     name_lower = vendor_name.lower()
-
     for kw, info in _known_vendor_map.items():
         if kw in name_lower:
             return info["id"], info["name"], True
-
     user_map = _load_user_vendor_map()
     if name_lower.strip() in user_map:
         info = user_map[name_lower.strip()]
         return info["id"], info["name"], True
-
     try:
         first_word = name_lower.split()[0] if name_lower.split() else name_lower
         conn = sqlite3.connect(DB_PATH)
@@ -199,7 +187,6 @@ def find_vendor_id(vendor_name: str) -> Tuple[int, str, bool]:
             return rows[0][0], rows[0][1], False
     except Exception:
         pass
-
     return DEFAULT_VENDOR_ID, "Default Replenishment Vendor", False
 
 # ---------------------------------------------------------------------------
@@ -289,3 +276,85 @@ def find_sku_id(vendor_part_no: str) -> Tuple[int, bool]:
                 (f"%{vendor_part_no.lower()[:20]}%",)
             ).fetchone()
         conn.close()
+        if row:
+            return row[0], True
+    except Exception:
+        pass
+    return GENERIC_SKU_ID, False
+
+# ---------------------------------------------------------------------------
+# Add items to existing PO (never deletes)
+# ---------------------------------------------------------------------------
+def add_items_to_existing_po(po_id: int, line_items: list) -> Tuple[int, list]:
+    unmatched = []
+    added = 0
+    for item in line_items:
+        part_no = item.get("part_no", "")
+        desc    = item.get("description", "")
+        qty     = item.get("qty", 1) or 1
+        cost    = item.get("unit_price", 0.0) or 0.0
+        sku_id, matched = find_sku_id(part_no)
+        full_desc = f"{part_no} - {desc}" if part_no and desc else (part_no or desc or "Material")
+        try:
+            _post(("inventory", f"purchase-orders/{po_id}/items"), {
+                "skuId": sku_id, "description": full_desc[:500],
+                "vendorPartNumber": part_no, "quantity": qty, "cost": cost,
+            })
+            added += 1
+        except Exception as e:
+            print(f"  ⚠ Could not add item: {e}")
+        if not matched:
+            unmatched.append({"part_no": part_no, "description": desc, "qty": qty, "cost": cost})
+    return added, unmatched
+
+# ---------------------------------------------------------------------------
+# Create new PO
+# ---------------------------------------------------------------------------
+def create_po_with_items(
+    vendor_id: int,
+    job_id: Optional[int],
+    po_type_id: int,
+    line_items: list,
+    memo: str = "",
+    business_unit_id: Optional[int] = None,
+) -> Tuple[Optional[int], list]:
+    st_items  = []
+    unmatched = []
+    for item in line_items:
+        part_no = item.get("part_no", "")
+        desc    = item.get("description", "")
+        qty     = item.get("qty", 1) or 1
+        cost    = item.get("unit_price", 0.0) or 0.0
+        sku_id, matched = find_sku_id(part_no)
+        full_desc = f"{part_no} - {desc}" if part_no and desc else (part_no or desc or "Material")
+        st_items.append({
+            "skuId": sku_id, "description": full_desc[:500],
+            "vendorPartNumber": part_no, "quantity": qty, "cost": cost,
+        })
+        if not matched:
+            unmatched.append({"part_no": part_no, "description": desc, "qty": qty, "cost": cost})
+
+    body = {
+        "vendorId":                 vendor_id,
+        "typeId":                   po_type_id,
+        "businessUnitId":           business_unit_id or DEFAULT_BUSINESS_UNIT_ID,
+        "inventoryLocationId":      DEFAULT_INVENTORY_LOC_ID,
+        "date":                     date.today().isoformat(),
+        "requiredOn":               date.today().isoformat(),
+        "tax": 0, "shipping": 0,
+        "impactsTechnicianPayroll": False,
+        "shipTo":                   SHIP_TO,
+        "memo":                     memo,
+        "items":                    st_items,
+    }
+    if job_id:
+        body["jobId"] = job_id
+    try:
+        result = _post(("inventory", "purchase-orders"), body)
+        return result.get("id"), unmatched
+    except Exception as e:
+        print(f"Error creating PO: {e}")
+        return None, []
+
+def get_po_url(po_id: int) -> str:
+    return f"https://go.servicetitan.com/#/new/inventory/purchase-orders/details/{po_id}"
