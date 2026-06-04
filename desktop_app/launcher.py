@@ -11,7 +11,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -140,10 +140,10 @@ class ProcessManager:
         self._processes = [self.writer]
         self._monitor_thread: Optional[threading.Thread] = None
         self._running = False
-        self.cache_sync   = CacheSyncManager(env=creds)
+        self.cache_sync    = CacheSyncManager(env=creds)
         self.quote_watcher = QuoteWatcherManager(env=creds)
-        self._email_env   = creds
-        self._email_proc: Optional[subprocess.Popen] = None  # tracked for proper restart
+        self._email_env    = creds
+        self._email_proc: Optional[subprocess.Popen] = None
 
     @property
     def python_ok(self) -> bool:
@@ -168,14 +168,12 @@ class ProcessManager:
         self._stop_email_monitor()
 
     def restart_all(self):
-        """Restart all managed processes including email monitor."""
         self._stop_email_monitor()
         for p in self._processes:
             p.restart()
         threading.Thread(target=self._start_email_monitor, daemon=True).start()
 
     def _stop_email_monitor(self):
-        """Kill the email monitor process if running."""
         if self._email_proc and self._email_proc.poll() is None:
             try:
                 self._email_proc.terminate()
@@ -247,8 +245,16 @@ class CacheSyncManager:
     def _loop(self):
         self._do_sync()
         while True:
-            time.sleep(self.INTERVAL_HOURS * 3600)
+            self._sleep_until_3am()
             self._do_sync()
+
+    def _sleep_until_3am(self):
+        """Sleep until 3 AM every day."""
+        now   = datetime.now()
+        next3 = now.replace(hour=3, minute=0, second=0, microsecond=0)
+        if next3 <= now:
+            next3 += timedelta(days=1)
+        time.sleep((next3 - now).total_seconds())
 
     def _do_sync(self):
         if not CACHE_SYNC_SCRIPT.exists():
@@ -368,7 +374,7 @@ class QuoteWatcherManager:
 
 
 # ---------------------------------------------------------------------------
-# Credentials loader — loads ALL env vars from .env
+# Credentials loader
 # ---------------------------------------------------------------------------
 def _load_credentials() -> dict:
     keys = [
@@ -424,7 +430,6 @@ class StatusWindow(ctk.CTk):
         ctk.CTkLabel(header, text=f"v{APP_VERSION}",
                      font=ctk.CTkFont(size=12),
                      text_color=GRAY).pack(side="right", padx=16, pady=12)
-
         svc_frame = ctk.CTkFrame(self)
         svc_frame.pack(fill="x", **pad)
         ctk.CTkLabel(svc_frame, text="SERVICES",
@@ -435,7 +440,6 @@ class StatusWindow(ctk.CTk):
             self._service_rows[proc.name] = self._make_service_row(svc_frame, proc.name)
         self._cache_row = self._make_service_row(svc_frame, "Cache Sync")
         self._quote_row = self._make_service_row(svc_frame, "Quote Watcher")
-
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.pack(fill="x", padx=16, pady=4)
         self.restart_btn = ctk.CTkButton(btn_frame, text="⟳  Restart Services", width=190, command=self._restart)
@@ -452,7 +456,6 @@ class StatusWindow(ctk.CTk):
         self.log_btn = ctk.CTkButton(btn_frame, text="📋 Log", width=70,
                                       fg_color="#444", hover_color="#555", command=self._open_log)
         self.log_btn.pack(side="left")
-
         self.update_banner = ctk.CTkFrame(self, fg_color="#1a3a1a", corner_radius=8)
         self.update_label  = ctk.CTkLabel(self.update_banner, text="", text_color=GREEN, wraplength=380)
         self.update_label.pack(padx=12, pady=8)
@@ -461,7 +464,6 @@ class StatusWindow(ctk.CTk):
             fg_color=GREEN, hover_color="#27ae60", text_color="black",
             command=self._install_update)
         self.install_btn.pack(pady=(0, 8))
-
         self.status_bar = ctk.CTkLabel(self, text="Running", text_color=GRAY,
                                         font=ctk.CTkFont(size=11))
         self.status_bar.pack(side="bottom", pady=6)
@@ -497,7 +499,6 @@ class StatusWindow(ctk.CTk):
             else:
                 row["dot"].configure(text_color=RED)
                 row["detail"].configure(text="Stopped")
-
         cs = self.proc_manager.cache_sync
         if cs.is_running:
             self._cache_row["dot"].configure(text_color=YELLOW)
@@ -508,7 +509,6 @@ class StatusWindow(ctk.CTk):
         else:
             self._cache_row["dot"].configure(text_color=GRAY)
             self._cache_row["detail"].configure(text=cs.last_status)
-
         qw = self.proc_manager.quote_watcher
         if qw.is_running:
             self._quote_row["dot"].configure(text_color=YELLOW)
@@ -519,7 +519,6 @@ class StatusWindow(ctk.CTk):
         else:
             self._quote_row["dot"].configure(text_color=GRAY)
             self._quote_row["detail"].configure(text=qw.last_status)
-
         if not self.proc_manager.python_ok:
             self.status_bar.configure(text="Python not found — install Python 3.9+", text_color=RED)
         self.tray_app.update_icon(self.proc_manager.all_running)
@@ -623,7 +622,6 @@ class StatusWindow(ctk.CTk):
                     time.sleep(0.5)
                 _log("Restarting application…")
                 time.sleep(1)
-                # Full application restart — kills everything and relaunches exe
                 self.after(0, self._full_restart)
             else:
                 self.after(0, lambda: (
@@ -633,18 +631,12 @@ class StatusWindow(ctk.CTk):
         threading.Thread(target=_do, daemon=True).start()
 
     def _full_restart(self):
-        """
-        Fully restart the launcher exe so the new version loads.
-        Stops all processes, releases lock, launches new instance, exits.
-        """
         self.proc_manager.stop_all()
         _release_single_instance_lock()
-        # Launch new instance of this exe
         subprocess.Popen(
             [sys.executable] + sys.argv,
             creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
         )
-        # Exit current instance
         if self.tray_app._tray:
             self.tray_app._tray.stop()
         sys.exit(0)
