@@ -3,15 +3,14 @@ Quote App — Entry Point
 ========================
 Processes incoming vendor quotes → creates PO Requests in ServiceTitan
 → notifies purchaser via Teams.
-
 Run manually:  python main.py
 Run once:      python main.py --once
 Process file:  python main.py --file path/to/quote.pdf
-
 Normally launched by the ST MCP desktop app's folder watcher.
 """
-
 import sys
+
+sys.stdout.reconfigure(encoding='utf-8')
 import argparse
 from pathlib import Path
 
@@ -34,11 +33,9 @@ def main():
         # Process a single file
         result = process_quote_file(args.file)
         sys.exit(0 if result["success"] else 1)
-
     elif args.once:
         # One-shot scan of the inbox folder
         scan_and_process(QUOTES_INBOX_FOLDER, process_quote_file, one_shot=True)
-
     else:
         # Continuous watch (default)
         print("ST Quote Processor starting...")
