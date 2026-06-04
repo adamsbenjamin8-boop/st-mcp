@@ -630,12 +630,12 @@ class StatusWindow(ctk.CTk):
                 ))
         threading.Thread(target=_do, daemon=True).start()
 
-    def _full_restart(self):
+def _full_restart(self):
         self.proc_manager.stop_all()
         _release_single_instance_lock()
         subprocess.Popen(
-            [sys.executable] + sys.argv,
-            creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+            [sys.executable],
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         )
         if self.tray_app._tray:
             self.tray_app._tray.stop()
