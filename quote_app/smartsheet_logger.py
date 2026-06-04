@@ -15,7 +15,7 @@ def _load_env():
         for line in env_file.read_text().splitlines():
             if "=" in line and not line.startswith("#"):
                 k, _, v = line.partition("=")
-                os.environ[k.strip()] = v.strip()  # direct override
+                os.environ[k.strip()] = v.strip()  # direct override, not setdefault
 
 _load_env()
 
