@@ -112,7 +112,7 @@ def _load_env():
                 line = line.strip()
                 if "=" in line and not line.startswith("#"):
                     k, _, v = line.partition("=")
-                    os.environ.setdefault(k.strip(), v.strip())
+                    os.environ[k.strip()] = v.strip()
             break
 
 _load_env()

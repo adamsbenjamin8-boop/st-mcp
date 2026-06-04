@@ -1,70 +1,109 @@
 """
-Email Monitor — watches orders@denommeeplumbing.com for new quote emails
-and saves attachments to the Incoming Quotes folder for processing.
-
-Uses IMAP over SSL — no Azure app registration or Power Automate needed.
-Runs as a background thread inside the desktop app.
-
-Supported attachment types: .pdf, .csv, .xlsx
+Email Monitor — watches orders@denommeeplumbing.com via Microsoft Graph API (OAuth2).
+Saves attachments + metadata sidecar for quote processing.
+Also handles [VENDOR_MAP] emails from Smartsheet automation.
 """
-
-import email
-import imaplib
 import os
+import json
 import time
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+import httpx
 
 from config import QUOTES_INBOX_FOLDER, ORDERS_EMAIL
-from approved_senders import (
-    is_approved, get_domain, queue_for_approval,
-    process_approval_email, sync_from_smartsheet
-)
 
 # ---------------------------------------------------------------------------
-# IMAP settings for Microsoft 365
+# Microsoft Graph settings
 # ---------------------------------------------------------------------------
-IMAP_HOST = "outlook.office365.com"
-IMAP_PORT = 993
-IMAP_FOLDER = "INBOX"
-POLL_SECONDS = 120   # Check every 2 minutes
+GRAPH_AUTH_URL   = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+GRAPH_BASE       = "https://graph.microsoft.com/v1.0"
+POLL_SECONDS     = 120
+SUPPORTED_EXTS   = {'.pdf', '.csv', '.xlsx'}
 
-SUPPORTED_EXTENSIONS = {'.pdf', '.csv', '.xlsx'}
+# ---------------------------------------------------------------------------
+# Load credentials
+# ---------------------------------------------------------------------------
+def _load_env():
+    for env_file in [
+        Path(__file__).parent.parent / ".env",
+        Path("C:/Program Files/ST_MCP/.env"),
+    ]:
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, _, v = line.partition("=")
+                    os.environ[k.strip()] = v.strip()
+            break
+
+_load_env()
+
+_graph_token_cache = {"token": None, "expires_at": 0.0}
+
+def _get_graph_token() -> Optional[str]:
+    now = time.monotonic()
+    if _graph_token_cache["token"] and now < _graph_token_cache["expires_at"] - 30:
+        return _graph_token_cache["token"]
+
+    tenant_id     = os.environ.get("AZURE_TENANT_ID", "")
+    client_id     = os.environ.get("AZURE_CLIENT_ID", "")
+    client_secret = os.environ.get("AZURE_CLIENT_SECRET", "")
+
+    if not all([tenant_id, client_id, client_secret]):
+        return None
+
+    try:
+        resp = httpx.post(
+            GRAPH_AUTH_URL.format(tenant=tenant_id),
+            data={
+                "grant_type":    "client_credentials",
+                "client_id":     client_id,
+                "client_secret": client_secret,
+                "scope":         "https://graph.microsoft.com/.default",
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        _graph_token_cache["token"]      = data["access_token"]
+        _graph_token_cache["expires_at"] = now + data.get("expires_in", 3600)
+        return _graph_token_cache["token"]
+    except Exception as e:
+        print(f"Graph auth failed: {e}")
+        return None
+
+def _graph_headers() -> dict:
+    token = _get_graph_token()
+    if not token:
+        raise RuntimeError("No Graph token available")
+    return {"Authorization": f"Bearer {token}"}
 
 
 class EmailMonitor:
-    """
-    Polls the orders mailbox for new emails with quote attachments.
-    Saves attachments to the Incoming Quotes folder.
-    """
-
-    def __init__(self, email_address: str, password: str, dest_folder: Path):
-        self.email_address = email_address
-        self.password      = password
-        self.dest_folder   = dest_folder
+    def __init__(self, mailbox: str, dest_folder: Path):
+        self.mailbox     = mailbox
+        self.dest_folder = dest_folder
         self.last_checked: Optional[datetime] = None
-        self.last_status   = "Not yet checked"
-        self.is_running    = False
+        self.last_status = "Not yet checked"
+        self.is_running  = False
         self._thread: Optional[threading.Thread] = None
 
     def start(self):
-        """Start the background polling thread."""
-        if not self.email_address or not self.password:
-            self.last_status = "Email credentials not configured"
+        token = _get_graph_token()
+        if not token:
+            self.last_status = "Azure credentials not configured — email monitor not starting"
+            print(f"  ⚠ {self.last_status}")
             return
         self.dest_folder.mkdir(parents=True, exist_ok=True)
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
     def check_now(self):
-        """Trigger an immediate check (called from UI button)."""
         threading.Thread(target=self._do_check, daemon=True).start()
 
     def _loop(self):
-        # Sync approved senders on first start
-        sync_from_smartsheet()
         while True:
             self._do_check()
             time.sleep(POLL_SECONDS)
@@ -74,177 +113,139 @@ class EmailMonitor:
             return
         self.is_running = True
         try:
-            new_files = self._fetch_attachments()
+            saved = self._fetch_attachments()
             self.last_checked = datetime.now()
-            if new_files:
+            if saved:
                 self.last_status = (
                     f"Last check: {self.last_checked.strftime('%b %d %I:%M %p')} "
-                    f"— {len(new_files)} file{'s' if len(new_files) != 1 else ''} saved"
+                    f"— {len(saved)} file{'s' if len(saved) != 1 else ''} saved"
                 )
             else:
                 self.last_status = f"Last check: {self.last_checked.strftime('%b %d %I:%M %p')} — no new quotes"
         except Exception as e:
             self.last_status = f"Email check failed: {e}"
+            print(f"  ❌ Email check error: {e}")
         finally:
             self.is_running = False
 
     def _fetch_attachments(self) -> list:
-        """
-        Connect to IMAP, find unread emails with attachments, save them.
-        Returns list of saved file paths.
-        """
-        saved = []
+        saved    = []
+        msgs_url = (
+            f"{GRAPH_BASE}/users/{self.mailbox}/mailFolders/inbox/messages"
+            f"?$filter=isRead eq false&$top=20"
+            f"&$select=id,subject,from,receivedDateTime,body"
+        )
+        try:
+            r = httpx.get(msgs_url, headers=_graph_headers(), timeout=30)
+            r.raise_for_status()
+            messages = r.json().get("value", [])
+        except Exception as e:
+            print(f"  ❌ Could not fetch messages: {e}")
+            return saved
 
-        with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT) as mail:
-            mail.login(self.email_address, self.password)
-            mail.select(IMAP_FOLDER)
+        for msg in messages:
+            msg_id  = msg.get("id", "")
+            subject = msg.get("subject", "")
+            sender  = msg.get("from", {}).get("emailAddress", {}).get("address", "")
+            body    = msg.get("body", {}).get("content", "")[:2000]
 
-            # Search for unread emails
-            _, msg_ids = mail.search(None, "UNSEEN")
-            if not msg_ids or not msg_ids[0]:
-                return saved
+            # Handle vendor mapping emails from Smartsheet
+            if "[VENDOR_MAP]" in subject:
+                self._handle_vendor_map_email(subject)
+                self._mark_read(msg_id)
+                continue
 
-            for msg_id in msg_ids[0].split():
-                try:
-                    _, msg_data = mail.fetch(msg_id, "(RFC822)")
-                    raw = msg_data[0][1]
-                    msg = email.message_from_bytes(raw)
+            # Fetch attachments
+            att_url = f"{GRAPH_BASE}/users/{self.mailbox}/messages/{msg_id}/attachments"
+            try:
+                r2 = httpx.get(att_url, headers=_graph_headers(), timeout=30)
+                r2.raise_for_status()
+                attachments = r2.json().get("value", [])
+            except Exception:
+                continue
 
-                    sender  = msg.get("From", "")
-                    subject = msg.get("Subject", "")
-                    date    = msg.get("Date", "")
+            found_attachment = False
+            for att in attachments:
+                filename = att.get("name", "")
+                ext      = Path(filename).suffix.lower()
+                if ext not in SUPPORTED_EXTS:
+                    continue
 
-                    # Check for vendor approval confirmation first
-                    if process_approval_email(subject):
-                        mail.store(msg_id, "+FLAGS", "\\Seen")
-                        continue
+                content_bytes = att.get("contentBytes")
+                if not content_bytes:
+                    continue
 
-                    # Enforce sender allowlist
-                    sender_domain = get_domain(sender)
-                    if not is_approved(sender_domain):
-                        print(f"  🔒 Unknown sender: {sender} — queuing for approval")
-                        # Extract vendor name from sender display name if possible
-                        vendor_name = sender.split("<")[0].strip().strip('"') or sender_domain
-                        # Look up ST vendor ID
-                        st_vendor_id = ""
-                        try:
-                            from st_client import find_vendor_id
-                            vid = find_vendor_id(vendor_name)
-                            if vid:
-                                st_vendor_id = str(vid)
-                        except Exception:
-                            pass
-                        queue_for_approval(
-                            vendor_name=vendor_name,
-                            email_domain=sender_domain,
-                            st_vendor_id=st_vendor_id,
-                            sender_email=sender,
-                            notes=f"Subject: {subject}",
-                        )
-                        # Move to Quarantine instead of processing
-                        quarantine = self.dest_folder.parent / "Quarantine"
-                        quarantine.mkdir(parents=True, exist_ok=True)
-                        # Save attachment to Quarantine
-                        for part in msg.walk():
-                            if part.get("Content-Disposition") is None:
-                                continue
-                            filename = part.get_filename()
-                            if filename:
-                                data = part.get_payload(decode=True)
-                                if data:
-                                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                                    (quarantine / f"{ts}_{filename}").write_bytes(data)
-                        mail.store(msg_id, "+FLAGS", "\\Seen")
-                        continue
+                import base64
+                data = base64.b64decode(content_bytes)
 
-                    # Walk attachments (approved sender)
-                    for part in msg.walk():
-                        if part.get_content_maintype() == "multipart":
-                            continue
-                        if part.get("Content-Disposition") is None:
-                            continue
+                ts        = datetime.now().strftime("%Y%m%d_%H%M%S")
+                safe_name = "".join(c for c in Path(filename).stem if c.isalnum() or c in "._- ")
+                dest_name = f"{ts}_{safe_name}{ext}"
+                dest_path = self.dest_folder / dest_name
 
-                        filename = part.get_filename()
-                        if not filename:
-                            continue
+                dest_path.write_bytes(data)
+                saved.append(str(dest_path))
+                found_attachment = True
 
-                        # Decode if needed
-                        if isinstance(filename, bytes):
-                            filename = filename.decode("utf-8", errors="replace")
+                # Save metadata sidecar
+                meta = {
+                    "subject": subject,
+                    "body":    body,
+                    "sender":  sender,
+                    "date":    msg.get("receivedDateTime", ""),
+                }
+                dest_path.with_suffix(".meta.json").write_text(
+                    json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+                )
+                print(f"  📥 Saved: {dest_name} | From: {sender}")
 
-                        # Only process supported file types
-                        ext = Path(filename).suffix.lower()
-                        if ext not in SUPPORTED_EXTENSIONS:
-                            continue
-
-                        # Save to inbox folder with timestamp to avoid collisions
-                        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        safe_name = "".join(c for c in Path(filename).stem if c.isalnum() or c in "._- ")
-                        dest_filename = f"{ts}_{safe_name}{ext}"
-                        dest_path = self.dest_folder / dest_filename
-
-                        data = part.get_payload(decode=True)
-                        if data:
-                            dest_path.write_bytes(data)
-                            saved.append(str(dest_path))
-                            print(f"  📎 Saved attachment: {dest_filename}")
-                            print(f"     From: {sender} | Subject: {subject}")
-
-                    # Mark as read after processing
-                    if saved:
-                        mail.store(msg_id, "+FLAGS", "\\Seen")
-
-                except Exception as e:
-                    print(f"  Error processing message {msg_id}: {e}")
+            if found_attachment:
+                self._mark_read(msg_id)
 
         return saved
 
+    def _mark_read(self, msg_id: str):
+        try:
+            httpx.patch(
+                f"{GRAPH_BASE}/users/{self.mailbox}/messages/{msg_id}",
+                headers={**_graph_headers(), "Content-Type": "application/json"},
+                json={"isRead": True},
+                timeout=15,
+            )
+        except Exception:
+            pass
 
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Factory — reads credentials from environment/.env
-# ---------------------------------------------------------------------------
+    def _handle_vendor_map_email(self, subject: str):
+        try:
+            body = subject.replace("[VENDOR_MAP]", "").strip()
+            if "=" not in body:
+                return
+            quote_name, _, st_name = body.partition("=")
+            quote_name = quote_name.strip()
+            st_name    = st_name.strip()
+            if quote_name and st_name:
+                from st_client import save_vendor_mapping
+                save_vendor_mapping(quote_name, st_name)
+                print(f"  ✓ Vendor mapping updated: '{quote_name}' → '{st_name}'")
+        except Exception as e:
+            print(f"  ⚠ Could not process vendor map email: {e}")
+
+
 def create_monitor() -> EmailMonitor:
-    """Create an EmailMonitor using credentials from environment."""
-    email_addr = os.environ.get("ORDERS_EMAIL_ADDRESS", ORDERS_EMAIL)
-    password   = os.environ.get("ORDERS_EMAIL_PASSWORD", "")
-    return EmailMonitor(
-        email_address=email_addr,
-        password=password,
-        dest_folder=QUOTES_INBOX_FOLDER,
-    )
+    mailbox = os.environ.get("ORDERS_EMAIL_ADDRESS", ORDERS_EMAIL)
+    return EmailMonitor(mailbox=mailbox, dest_folder=QUOTES_INBOX_FOLDER)
 
 
 if __name__ == "__main__":
-    """Run as a standalone background process."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-
-    # Load .env
-    env_paths = [
-        Path(__file__).parent.parent / ".env",
-        Path("C:/Program Files/ST_MCP/.env"),
-    ]
-    for ep in env_paths:
-        if ep.exists():
-            for line in ep.read_text().splitlines():
-                line = line.strip()
-                if "=" in line and not line.startswith("#"):
-                    k, _, v = line.partition("=")
-                    os.environ.setdefault(k.strip(), v.strip())
-            break
-
     monitor = create_monitor()
-    if not monitor.password:
-        print("ORDERS_EMAIL_PASSWORD not set — email monitor not starting")
+    token   = _get_graph_token()
+    if not token:
+        print("Azure credentials not configured — email monitor not starting")
+        print("Required: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET in .env")
+        import sys
         sys.exit(0)
-
-    print(f"Email monitor starting — watching {monitor.email_address}")
+    print(f"Email monitor starting — watching {monitor.mailbox}")
     print(f"Saving attachments to: {monitor.dest_folder}")
     monitor.start()
-
-    # Keep alive
     while True:
         time.sleep(60)
-
-
