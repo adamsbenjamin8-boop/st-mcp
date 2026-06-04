@@ -26,7 +26,7 @@ ESTIMATES_EMAIL = "Estimates@denommeeplumbing.com"  # → add to estimate workfl
 # Set QUOTES_INBOX_FOLDER to the full path of the folder on this computer.
 # ---------------------------------------------------------------------------
 # Purchasing folders live in Documents so they're easy to find and already OneDrive-synced
-_docs = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Documents"
+_docs = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "OneDrive - Denommee Plumbing and Heating" / "Documents"
 QUOTES_INBOX_FOLDER    = _docs / "Purchasing" / "Incoming Quotes"
 ESTIMATES_INBOX_FOLDER = _docs / "Purchasing" / "Incoming Estimates"
 PROCESSED_FOLDER       = _docs / "Purchasing" / "Processed"
@@ -67,3 +67,4 @@ PARSERS_DIR = Path(__file__).parent.parent / "quote_parsers"
 # ---------------------------------------------------------------------------
 ST_AUTH_URL = "https://auth.servicetitan.io/connect/token"
 ST_API_BASE = "https://api.servicetitan.io"
+
