@@ -633,16 +633,12 @@ class StatusWindow(ctk.CTk):
 def _full_restart(self):
         self.proc_manager.stop_all()
         _release_single_instance_lock()
-        bat_path = APP_DIR / "_restart.bat"
-        bat_path.write_text(
-            f'@echo off\n'
-            f'timeout /t 2 /nobreak > nul\n'
-            f'start "" "{sys.executable}"\n'
-            f'del "%~f0"\n'
-        )
-        subprocess.Popen(
-            ['cmd', '/c', str(bat_path)],
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "Update installed successfully!\n\nPlease relaunch ST MCP from your desktop or system tray.",
+            "Restart Required",
+            0x40,
         )
         if self.tray_app._tray:
             self.tray_app._tray.stop()
