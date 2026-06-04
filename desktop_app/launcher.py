@@ -633,8 +633,15 @@ class StatusWindow(ctk.CTk):
 def _full_restart(self):
         self.proc_manager.stop_all()
         _release_single_instance_lock()
+        bat_path = APP_DIR / "_restart.bat"
+        bat_path.write_text(
+            f'@echo off\n'
+            f'timeout /t 2 /nobreak > nul\n'
+            f'start "" "{sys.executable}"\n'
+            f'del "%~f0"\n'
+        )
         subprocess.Popen(
-            [sys.executable],
+            ['cmd', '/c', str(bat_path)],
             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         )
         if self.tray_app._tray:
