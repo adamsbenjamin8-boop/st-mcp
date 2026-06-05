@@ -615,12 +615,7 @@ class StatusWindow(ctk.CTk):
         def _do():
             ok = apply_script_update(result, progress_cb=_log)
             if ok:
-                _log("Update installed — syncing cache…")
-                self.proc_manager.cache_sync.run_now()
-                time.sleep(0.5)
-                while self.proc_manager.cache_sync.is_running:
-                    time.sleep(0.5)
-                _log("Restarting application…")
+                _log("Update installed — restarting…")
                 time.sleep(1)
                 self.after(0, self._full_restart)
             else:
@@ -630,19 +625,12 @@ class StatusWindow(ctk.CTk):
                 ))
         threading.Thread(target=_do, daemon=True).start()
 
-def _full_restart(self):
+    def _full_restart(self):
         self.proc_manager.stop_all()
         _release_single_instance_lock()
-        import ctypes
-        ctypes.windll.user32.MessageBoxW(
-            0,
-            "Update installed successfully!\n\nPlease relaunch ST MCP from your desktop or system tray.",
-            "Restart Required",
-            0x40,
-        )
         if self.tray_app._tray:
             self.tray_app._tray.stop()
-        sys.exit(0)
+        os._exit(0)
 
 
 # ---------------------------------------------------------------------------
