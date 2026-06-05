@@ -195,17 +195,24 @@ def find_vendor_id(vendor_name: str) -> Tuple[int, str, bool]:
 def extract_job_reference(text: str) -> Optional[str]:
     if not text:
         return None
+    # Keyword-prefixed patterns first (most reliable)
     for pattern in [
         r'job\s*#?\s*(\d{5,})',
         r'job\s*number\s*:?\s*(\d{5,})',
         r'work\s*order\s*#?\s*(\d{5,})',
         r'wo\s*#?\s*(\d{5,})',
-        r'po\s*#?\s*(\d{5,})',
+        r'po\s*#?\s*([\d]{5,}(?:-\d+)?)',
         r'#\s*(\d{6,})',
     ]:
         m = re.search(pattern, text.lower())
         if m:
-            return m.group(1)
+            # Strip trailing -XXX sequence if present (PO display number → job number)
+            val = m.group(1).replace('-', '')
+            return val
+    # Bare 9-12 digit numbers last (catches job numbers and PO numbers without keywords)
+    m = re.search(r'\b(\d{9,12})\b', text)
+    if m:
+        return m.group(1)
     return None
 
 # ---------------------------------------------------------------------------
@@ -214,6 +221,10 @@ def extract_job_reference(text: str) -> Optional[str]:
 def find_job_id(job_ref: str) -> Optional[dict]:
     if not job_ref or job_ref.lower() in ('test', ''):
         return None
+    # If 12-digit number (PO number without dash), try first 9 digits as job number
+    clean = job_ref.replace('-', '').strip()
+    if len(clean) > 9 and clean.isdigit():
+        job_ref = clean[:9]
     try:
         for params in [
             {"number": job_ref, "pageSize": 5},
