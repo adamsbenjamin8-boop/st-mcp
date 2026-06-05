@@ -86,9 +86,13 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
 
         # Step 3: Extract job reference — numeric only
         pdf_text = _extract_pdf_text(file_path)
+        # Only use cust_po as job ref if it's numeric — non-numeric values like
+        # "NANTUCKET" are project names, not job numbers. Email subject/body checked next.
+        _cust_po = getattr(parsed, 'cust_po', '') or ''
+        _cust_po_numeric = _cust_po.strip() if _cust_po.strip().isdigit() else ''
         job_ref  = (
             getattr(parsed, 'job_name', '')      or
-            getattr(parsed, 'cust_po', '')       or
+            _cust_po_numeric                     or
             extract_job_reference(email_subject) or
             extract_job_reference(email_body)    or
             extract_job_reference(pdf_text)      or ''
