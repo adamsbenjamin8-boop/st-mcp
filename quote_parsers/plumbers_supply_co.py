@@ -28,7 +28,7 @@ class Quote:
 
 def can_parse(text: str) -> bool:
     """Check if the text is from Plumbers Supply Co."""
-    return bool(re.search(r'Plumbers\s+Supply\s+Co\.?', text, re.IGNORECASE))
+    return bool(re.search(r"plumbers'?\s+supply", text, re.IGNORECASE))
 
 def parse(text: str) -> Quote:
     """Parse a Plumbers Supply Co quote."""
