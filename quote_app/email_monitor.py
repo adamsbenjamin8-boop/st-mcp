@@ -3,6 +3,9 @@ Email Monitor — watches orders@denommeeplumbing.com via Microsoft Graph API (O
 Saves attachments + metadata sidecar for quote processing.
 Also handles [VENDOR_MAP] emails from Smartsheet automation.
 """
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+
 import os
 import json
 import time
@@ -21,6 +24,8 @@ GRAPH_AUTH_URL   = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token
 GRAPH_BASE       = "https://graph.microsoft.com/v1.0"
 POLL_SECONDS     = 120
 SUPPORTED_EXTS   = {'.pdf', '.csv', '.xlsx'}
+
+
 
 # ---------------------------------------------------------------------------
 # Load credentials
@@ -41,6 +46,7 @@ def _load_env():
 _load_env()
 
 _graph_token_cache = {"token": None, "expires_at": 0.0}
+
 
 def _get_graph_token() -> Optional[str]:
     now = time.monotonic()
@@ -74,6 +80,7 @@ def _get_graph_token() -> Optional[str]:
         print(f"Graph auth failed: {e}")
         return None
 
+
 def _graph_headers() -> dict:
     token = _get_graph_token()
     if not token:
@@ -94,7 +101,7 @@ class EmailMonitor:
         token = _get_graph_token()
         if not token:
             self.last_status = "Azure credentials not configured — email monitor not starting"
-            print(f"  ⚠ {self.last_status}")
+            print(f"  WARNING: {self.last_status}")
             return
         self.dest_folder.mkdir(parents=True, exist_ok=True)
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -118,13 +125,13 @@ class EmailMonitor:
             if saved:
                 self.last_status = (
                     f"Last check: {self.last_checked.strftime('%b %d %I:%M %p')} "
-                    f"— {len(saved)} file{'s' if len(saved) != 1 else ''} saved"
+                    f"- {len(saved)} file{'s' if len(saved) != 1 else ''} saved"
                 )
             else:
-                self.last_status = f"Last check: {self.last_checked.strftime('%b %d %I:%M %p')} — no new quotes"
+                self.last_status = f"Last check: {self.last_checked.strftime('%b %d %I:%M %p')} - no new quotes"
         except Exception as e:
             self.last_status = f"Email check failed: {e}"
-            print(f"  ❌ Email check error: {e}")
+            print(f"  ERROR: Email check error: {e}")
         finally:
             self.is_running = False
 
@@ -140,7 +147,7 @@ class EmailMonitor:
             r.raise_for_status()
             messages = r.json().get("value", [])
         except Exception as e:
-            print(f"  ❌ Could not fetch messages: {e}")
+            print(f"  ERROR: Could not fetch messages: {e}")
             return saved
 
         for msg in messages:
@@ -149,11 +156,13 @@ class EmailMonitor:
             sender  = msg.get("from", {}).get("emailAddress", {}).get("address", "")
             body    = msg.get("body", {}).get("content", "")[:2000]
 
-            # Handle vendor mapping emails from Smartsheet
+            # Handle vendor mapping emails from Smartsheet (always process regardless of sender)
             if "[VENDOR_MAP]" in subject:
                 self._handle_vendor_map_email(subject)
                 self._mark_read(msg_id)
                 continue
+
+           
 
             # Fetch attachments
             att_url = f"{GRAPH_BASE}/users/{self.mailbox}/messages/{msg_id}/attachments"
@@ -197,7 +206,7 @@ class EmailMonitor:
                 dest_path.with_suffix(".meta.json").write_text(
                     json.dumps(meta, ensure_ascii=False), encoding="utf-8"
                 )
-                print(f"  📥 Saved: {dest_name} | From: {sender}")
+                print(f"  Saved: {dest_name} | From: {sender}")
 
             if found_attachment:
                 self._mark_read(msg_id)
@@ -226,9 +235,9 @@ class EmailMonitor:
             if quote_name and st_name:
                 from st_client import save_vendor_mapping
                 save_vendor_mapping(quote_name, st_name)
-                print(f"  ✓ Vendor mapping updated: '{quote_name}' → '{st_name}'")
+                print(f"  Vendor mapping updated: '{quote_name}' -> '{st_name}'")
         except Exception as e:
-            print(f"  ⚠ Could not process vendor map email: {e}")
+            print(f"  WARNING: Could not process vendor map email: {e}")
 
 
 def create_monitor() -> EmailMonitor:
@@ -242,7 +251,6 @@ if __name__ == "__main__":
     if not token:
         print("Azure credentials not configured — email monitor not starting")
         print("Required: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET in .env")
-        import sys
         sys.exit(0)
     print(f"Email monitor starting — watching {monitor.mailbox}")
     print(f"Saving attachments to: {monitor.dest_folder}")
