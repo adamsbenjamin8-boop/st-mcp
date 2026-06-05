@@ -630,6 +630,14 @@ class StatusWindow(ctk.CTk):
         _release_single_instance_lock()
         if self.tray_app._tray:
             self.tray_app._tray.stop()
+        # Relaunch the app before exiting so updates apply automatically
+        try:
+            subprocess.Popen(
+                [str(sys.executable)] + sys.argv,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+        except Exception:
+            pass
         os._exit(0)
 
 
