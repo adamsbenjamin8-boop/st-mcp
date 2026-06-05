@@ -25,6 +25,28 @@ GRAPH_BASE       = "https://graph.microsoft.com/v1.0"
 POLL_SECONDS     = 120
 SUPPORTED_EXTS   = {'.pdf', '.csv', '.xlsx'}
 
+# Local file to track processed message IDs (prevents reprocessing if mark-as-read fails)
+PROCESSED_IDS_FILE = Path("C:/Program Files/ST_MCP/processed_email_ids.json")
+
+def _load_processed_ids() -> set:
+    try:
+        if PROCESSED_IDS_FILE.exists():
+            data = __import__('json').loads(PROCESSED_IDS_FILE.read_text(encoding='utf-8'))
+            return set(data.get("ids", []))
+    except Exception:
+        pass
+    return set()
+
+def _save_processed_id(msg_id: str):
+    try:
+        ids = _load_processed_ids()
+        ids.add(msg_id)
+        ids_list = list(ids)[-500:]
+        PROCESSED_IDS_FILE.write_text(
+            __import__('json').dumps({"ids": ids_list}, indent=2), encoding='utf-8'
+        )
+    except Exception as e:
+        print(f"  WARNING: Could not save processed ID: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -150,15 +172,22 @@ class EmailMonitor:
             print(f"  ERROR: Could not fetch messages: {e}")
             return saved
 
+        processed_ids = _load_processed_ids()
         for msg in messages:
             msg_id  = msg.get("id", "")
             subject = msg.get("subject", "")
             sender  = msg.get("from", {}).get("emailAddress", {}).get("address", "")
             body    = msg.get("body", {}).get("content", "")[:2000]
 
+            # Skip already-processed messages (prevents reprocessing if mark-as-read fails)
+            if msg_id in processed_ids:
+                self._mark_read(msg_id)
+                continue
+
             # Handle vendor mapping emails from Smartsheet (always process regardless of sender)
             if "[VENDOR_MAP]" in subject:
                 self._handle_vendor_map_email(subject)
+                _save_processed_id(msg_id)
                 self._mark_read(msg_id)
                 continue
 
@@ -209,6 +238,10 @@ class EmailMonitor:
                 print(f"  Saved: {dest_name} | From: {sender}")
 
             if found_attachment:
+                _save_processed_id(msg_id)
+                self._mark_read(msg_id)
+            elif not attachments:
+                _save_processed_id(msg_id)
                 self._mark_read(msg_id)
 
         return saved
