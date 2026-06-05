@@ -180,7 +180,7 @@ def _save_parser(vendor_name: str, sample_text: str):
     prompt = f"""Write a Python parser for vendor quotes from "{vendor_name}".
 
 The parser must:
-1. Have a `can_parse(text: str) -> bool` function that returns True if the text is from this vendor
+1. Have a `can_parse(text: str) -> bool` function that returns True if the text is from this vendor. Use a flexible regex that handles apostrophes, punctuation variations, and abbreviations (e.g. use re.IGNORECASE and allow optional apostrophes/punctuation with `'?` or `[^a-z]*`)
 2. Have a `parse(text: str)` function that returns an object with:
    - vendor (str)
    - quote_no (str)
