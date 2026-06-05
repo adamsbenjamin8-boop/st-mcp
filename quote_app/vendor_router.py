@@ -1,8 +1,10 @@
 """
 Vendor Router — detects vendor from a quote file and routes to the correct parser.
+Auto-discovers any parser in quote_parsers/ that has can_parse() and parse() functions.
 """
 
 import csv
+import importlib
 import io
 import sys
 from pathlib import Path
@@ -11,6 +13,35 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from quote_parsers import ferguson, johnstone, fwwebb, generic_csv
+
+# Priority parsers — checked first (fast, known-good)
+_PRIORITY_PARSERS = [
+    ("Ferguson Enterprises", ferguson),
+    ("F.W. Webb",            fwwebb),
+    ("Johnstone Supply",     johnstone),
+]
+
+
+def _load_dynamic_parsers() -> list:
+    """
+    Load any additional parsers from quote_parsers/ that aren't in the priority list.
+    Returns list of (vendor_name, module) tuples.
+    """
+    parsers_dir = Path(__file__).parent.parent / "quote_parsers"
+    skip = {"ferguson", "fwwebb", "johnstone", "generic_csv", "__init__"}
+    dynamic = []
+    for f in sorted(parsers_dir.glob("*.py")):
+        if f.stem in skip:
+            continue
+        try:
+            mod = importlib.import_module(f"quote_parsers.{f.stem}")
+            if callable(getattr(mod, "can_parse", None)) and callable(getattr(mod, "parse", None)):
+                # Derive a display name from the module name
+                vendor_name = f.stem.replace("_", " ").title()
+                dynamic.append((vendor_name, mod))
+        except Exception as e:
+            print(f"  WARNING: Could not load parser {f.name}: {e}")
+    return dynamic
 
 
 def detect_and_parse(file_path: str):
@@ -45,14 +76,22 @@ def _extract_pdf_text(path: Path) -> str:
 def _parse_pdf(path: Path):
     text = _extract_pdf_text(path)
 
-    if ferguson.can_parse(text):
-        return "Ferguson Enterprises", ferguson.parse(text)
+    # Check priority parsers first
+    for vendor_name, mod in _PRIORITY_PARSERS:
+        if mod.can_parse(text):
+            return vendor_name, mod.parse(text)
 
-    if fwwebb.can_parse(text):
-        return "F.W. Webb", fwwebb.parse(text)
-
-    if johnstone.can_parse(text):
-        return "Johnstone Supply", johnstone.parse(text)
+    # Check auto-discovered parsers
+    for vendor_name, mod in _load_dynamic_parsers():
+        try:
+            if mod.can_parse(text):
+                result = mod.parse(text)
+                # Use vendor name from parsed result if available
+                parsed_vendor = getattr(result, 'vendor', None) or vendor_name
+                return parsed_vendor, result
+        except Exception as e:
+            print(f"  WARNING: Parser {vendor_name} failed: {e}")
+            continue
 
     # Unknown vendor — return None so caller can escalate to Claude
     return None, None
