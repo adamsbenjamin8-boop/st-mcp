@@ -1,30 +1,29 @@
 """
 Claude API Fallback Parser
-===========================
+==========================
 Called when no local vendor parser matches a quote.
-
 1. Sends extracted PDF text to the Claude API
 2. Gets back structured line items as JSON
 3. Saves a new vendor parser file to quote_parsers/ so next time it's local
-4. Returns the parsed quote object
-
+4. Self-tests the new parser before accepting it
+5. Returns the parsed quote object
 Uses claude-haiku (fast + cheap) by default.
 Cost: ~$0.001 per quote (fraction of a cent).
 """
-
+import importlib
+import importlib.util
 import json
 import os
 import re
-import textwrap
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
-
 import httpx
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_URL     = "https://api.anthropic.com/v1/messages"
-MODEL             = "claude-haiku-4-5"   # Fast and cheap — ideal for structured extraction
+MODEL             = "claude-haiku-4-5"
 
 PARSERS_DIR = Path(__file__).parent.parent / "quote_parsers"
 
@@ -56,16 +55,15 @@ def parse_with_claude(pdf_text: str, filename: str) -> Optional[ParsedQuote]:
     Returns a ParsedQuote or None on failure.
     """
     if not ANTHROPIC_API_KEY:
-        print("  ⚠  ANTHROPIC_API_KEY not set — skipping Claude fallback")
+        print("  WARNING: ANTHROPIC_API_KEY not set - skipping Claude fallback")
         return None
 
-    print(f"  🤖 Unknown vendor — calling Claude API for {filename}…")
+    print(f"  Unknown vendor - calling Claude API for {filename}...")
 
     prompt = f"""You are a purchase order data extractor. Extract the following from this vendor quote:
-
 1. Vendor name (company name on the quote)
 2. Quote/bid number
-3. Customer PO number (if present — may be blank or a job name)
+3. Customer PO number (if present - may be blank or a job name)
 4. Job name (if present)
 5. All line items with: part number, description, quantity, unit price, extended price, unit of measure
 
@@ -109,22 +107,20 @@ QUOTE TEXT:
         resp.raise_for_status()
         content = resp.json()["content"][0]["text"]
     except Exception as e:
-        print(f"  ❌ Claude API error: {e}")
+        print(f"  Claude API error: {e}")
         return None
 
-    # Extract JSON from response
     json_match = re.search(r'\{.*\}', content, re.DOTALL)
     if not json_match:
-        print(f"  ❌ Could not find JSON in Claude response")
+        print("  Could not find JSON in Claude response")
         return None
 
     try:
         data = json.loads(json_match.group())
     except json.JSONDecodeError as e:
-        print(f"  ❌ JSON parse error: {e}")
+        print(f"  JSON parse error: {e}")
         return None
 
-    # Build ParsedQuote
     quote = ParsedQuote(
         vendor=data.get("vendor", "Unknown"),
         quote_no=data.get("quote_no", ""),
@@ -132,7 +128,6 @@ QUOTE TEXT:
         job_name=data.get("job_name", ""),
         total=float(data.get("total", 0) or 0),
     )
-
     for item in data.get("line_items", []):
         try:
             quote.line_items.append(LineItem(
@@ -146,9 +141,8 @@ QUOTE TEXT:
         except (ValueError, TypeError):
             continue
 
-    print(f"  ✓ Claude extracted {len(quote.line_items)} items from {quote.vendor}")
+    print(f"  Claude extracted {len(quote.line_items)} items from {quote.vendor}")
 
-    # Save a new parser for this vendor
     if quote.vendor and quote.vendor != "Unknown":
         _save_parser(quote.vendor, pdf_text)
 
@@ -157,44 +151,51 @@ QUOTE TEXT:
 
 def _save_parser(vendor_name: str, sample_text: str):
     """
-    Ask Claude to write a Python parser function for this vendor
-    and save it to quote_parsers/.
+    Ask Claude to write a Python parser for this vendor, self-test it
+    against the sample text, then save it to quote_parsers/.
     """
     if not ANTHROPIC_API_KEY:
         return
 
-    safe_name = re.sub(r'[^a-z0-9]', '_', vendor_name.lower()).strip('_')
+    safe_name   = re.sub(r'[^a-z0-9]', '_', vendor_name.lower()).strip('_')
     parser_path = PARSERS_DIR / f"{safe_name}.py"
 
-    # Skip if a valid (non-empty) parser already exists
     if parser_path.exists() and parser_path.stat().st_size > 100:
         return
 
-    # Remove empty/invalid file so we can regenerate
     if parser_path.exists():
         parser_path.unlink()
         print(f"  WARNING: Removed empty/invalid parser for {vendor_name}, regenerating...")
 
-    print(f"  📝 Generating parser code for {vendor_name}…")
+    print(f"  Generating parser code for {vendor_name}...")
 
     prompt = f"""Write a Python parser for vendor quotes from "{vendor_name}".
 
-The parser must:
-1. Have a `can_parse(text: str) -> bool` function that returns True if the text is from this vendor. Use a flexible regex that handles apostrophes, punctuation variations, and abbreviations (e.g. use re.IGNORECASE and allow optional apostrophes/punctuation with `'?` or `[^a-z]*`)
-2. Have a `parse(text: str)` function that returns an object with:
-   - vendor (str)
-   - quote_no (str)
-   - cust_po (str)
-   - job_name (str)
+The parser MUST follow these exact requirements:
+
+1. `can_parse(text: str) -> bool`
+   - NEVER rely on just the vendor name - PDF text extraction is inconsistent.
+   - Build a list of 4-6 patterns covering: vendor name variations, phone number,
+     street address, website/domain, city+state, PO box or zip code.
+   - Return: any(re.search(p, text, re.IGNORECASE) for p in patterns)
+   - This ensures matching even when some text is missing or oddly formatted.
+
+2. `parse(text: str)` returning an object with:
+   - vendor (str), quote_no (str), cust_po (str), job_name (str)
    - net_total or total (float)
-   - line_items (list of objects with: part_no, description, qty, unit_price, unit_of_measure, total)
+   - line_items: list of objects with part_no, description, qty,
+     unit_price, unit_of_measure, total
+   - REQUIRED FALLBACK: if line_items is empty after parsing but total > 0,
+     append one item: part_no="SEE-QUOTE",
+     description=f"{vendor_name} Quote {{quote_no}} - see attached PDF",
+     qty=1, unit_price=total, unit_of_measure="EA", total=total
 
 Use only Python standard library (re, dataclasses). No external imports.
 
 Base the parser on this sample quote text:
 {sample_text[:4000]}
 
-Return ONLY the Python code, no explanation."""
+Return ONLY valid Python code, no markdown fences, no explanation."""
 
     try:
         resp = httpx.post(
@@ -214,37 +215,81 @@ Return ONLY the Python code, no explanation."""
         resp.raise_for_status()
         code = resp.json()["content"][0]["text"]
 
-        # Strip markdown code fences if present
         code = re.sub(r'^```python\s*', '', code, flags=re.MULTILINE)
-        code = re.sub(r'^```\s*$', '', code, flags=re.MULTILINE)
-
+        code = re.sub(r'^```\s*$',      '', code, flags=re.MULTILINE)
         code = code.strip()
 
-        # Validate -- must have can_parse and parse functions and be substantial
         if len(code) < 200 or 'can_parse' not in code or 'def parse' not in code:
-            print(f"  WARNING: Generated parser for {vendor_name} looks invalid -- not saving")
-            try:
-                from smartsheet_logger import log_quote
-                log_quote(vendor_name=vendor_name, filename="auto-parser",
-                          parsed_by="Claude AI", item_count=0, parser_added=False,
-                          notes=f"PARSER GENERATION FAILED -- invalid code. Send quote PDF to IT for manual parser.")
-            except Exception:
-                pass
+            print(f"  WARNING: Generated parser for {vendor_name} looks invalid - not saving")
+            _log_parser_failure(vendor_name, "invalid code generated")
             return
 
         header = f'"""\nAuto-generated parser for {vendor_name}.\nGenerated by Claude API on first encounter.\n"""\n\n'
         parser_path.write_text(header + code + "\n")
-        print(f"  OK: Parser saved: quote_parsers/{safe_name}.py")
-        print(f"     Review and push with next scripts-v tag to deploy to all computers")
+
+        # Self-test before accepting
+        passed = _self_test_parser(parser_path, safe_name, vendor_name, sample_text)
+        if not passed:
+            print(f"  WARNING: Parser for {vendor_name} failed self-test - file kept for manual review")
+            _log_parser_failure(vendor_name, "self-test failed: can_parse() returned False or 0 line items extracted")
+            return
+
+        print(f"  OK: Parser saved and self-tested: quote_parsers/{safe_name}.py")
+        print(f"      Review and push with next scripts-v tag to deploy")
 
     except Exception as e:
         print(f"  WARNING: Could not generate parser: {e}")
         if parser_path.exists() and parser_path.stat().st_size == 0:
             parser_path.unlink()
-        try:
-            from smartsheet_logger import log_quote
-            log_quote(vendor_name=vendor_name, filename="auto-parser",
-                      parsed_by="Claude AI", item_count=0, parser_added=False,
-                      notes=f"PARSER GENERATION FAILED -- API error: {e}. Send quote PDF to IT for manual parser.")
-        except Exception:
-            pass
+        _log_parser_failure(vendor_name, f"API error: {e}")
+
+
+def _self_test_parser(parser_path: Path, module_stem: str,
+                      vendor_name: str, sample_text: str) -> bool:
+    """
+    Dynamically load the newly written parser and run two checks:
+      1. can_parse(sample_text) must return True
+      2. parse(sample_text) must return >= 1 line item
+    Returns True if both pass.
+    """
+    try:
+        full_module = f"quote_parsers.{module_stem}"
+        if full_module in sys.modules:
+            del sys.modules[full_module]
+
+        spec = importlib.util.spec_from_file_location(full_module, parser_path)
+        mod  = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        if not mod.can_parse(sample_text):
+            print(f"  Self-test FAILED: {vendor_name} can_parse() returned False on sample text")
+            return False
+
+        result = mod.parse(sample_text)
+        items  = getattr(result, 'line_items', [])
+        if not items:
+            print(f"  Self-test FAILED: {vendor_name} parse() returned 0 line items")
+            return False
+
+        print(f"  Self-test PASSED: can_parse=True, {len(items)} item(s) extracted")
+        return True
+
+    except Exception as e:
+        print(f"  Self-test ERROR for {vendor_name}: {e}")
+        return False
+
+
+def _log_parser_failure(vendor_name: str, reason: str):
+    """Log a parser generation failure to Smartsheet for manual follow-up."""
+    try:
+        from smartsheet_logger import log_quote
+        log_quote(
+            vendor_name=vendor_name,
+            filename="auto-parser",
+            parsed_by="Claude AI",
+            item_count=0,
+            parser_added=False,
+            notes=f"PARSER GENERATION FAILED - {reason}. Send quote PDF to IT for manual parser."
+        )
+    except Exception:
+        pass
