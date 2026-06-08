@@ -1,32 +1,14 @@
 """
 Ferguson Enterprises Quote Parser
 ===================================
-Handles TWO Ferguson PDF formats:
-
+Handles THREE Ferguson PDF formats:
   1. Branch Price Quotation — emailed from branch reps
      Header: "FERGUSON ENTERPRISES LLC Price Quotation"
-     Fields: Bid No, Cust PO#, Job Name, tabular line items
-
   2. Online Draft Quote — printed from ferguson.com
      Header: "Quote Detail", "Draft Quote #: DQ..."
-     Fields: Draft Quote #, Job Name, PO #, inline line items
-
-Identified by: "FERGUSON" in document text
-
-Key fields extracted:
-  - vendor:       "Ferguson Enterprises"
-  - bid_no:       Ferguson's internal bid/reference number (e.g. B530252)
-  - cust_po:      Customer PO# field (may be blank — new PO needed if so)
-  - job_name:     Job Name field (e.g. LOCKHEED)
-  - bid_date:     Date of the quote
-  - line_items:   List of dicts with part_no, description, qty, unit_price, unit_of_measure, total
-
-Unit of Measure notes:
-  - EA  = each       (unit_price is per unit)
-  - C   = per 100    (unit_price is per 100 units — divide by 100 for each price)
-  - PK  = per pack   (unit_price is per pack)
+  3. Proposal/Bid format — "Ferg-Proposal-BPLB..." files
+     Header: "BRANCH - NEW ENGLAND", "Bid ID BPLB..."
 """
-
 import re
 from typing import Optional
 from dataclasses import dataclass, field
@@ -37,9 +19,9 @@ class QuoteLineItem:
     part_no: str
     description: str
     qty: float
-    unit_price: float        # always normalized to per-unit
-    unit_of_measure: str     # EA, C, PK, etc.
-    raw_price: float         # price as listed on quote (may be per-100 etc.)
+    unit_price: float
+    unit_of_measure: str
+    raw_price: float
     total: float
 
 
@@ -55,186 +37,170 @@ class FergusonQuote:
 
 
 def can_parse(text: str) -> bool:
-    """Return True if this text looks like a Ferguson quote (branch or online)."""
-    t = text.upper()
-    return "FERGUSON ENTERPRISES" in t or ("FERGUSON" in t and ("PRICE QUOTATION" in t or "QUOTE DETAIL" in t or "DRAFT QUOTE" in t))
+    patterns = [
+        r"ferguson enterprises",
+        r"fergusons?\s+quotation",
+        r"Bid\s+ID\s+BPLB",
+        r"nobody expects more from us than we do",
+        r"ferguson\.com",
+        r"price quotation",
+        r"quote detail",
+        r"draft quote",
+        r"ferg.{0,5}proposal",
+    ]
+    return any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
 
 def _is_online_quote(text: str) -> bool:
-    """Return True if this is an online Draft Quote from ferguson.com"""
     return "DRAFT QUOTE" in text.upper() or "QUOTE DETAIL" in text.upper()
 
 
+def _is_proposal_quote(text: str) -> bool:
+    return bool(re.search(r'Bid\s+ID\s+BPLB', text, re.IGNORECASE))
+
+
 def _parse_online(text: str) -> FergusonQuote:
+    quote = FergusonQuote()
+    m = re.search(r'Draft Quote\s*#[:\s]+([A-Z0-9]+)', text, re.IGNORECASE)
+    if m:
+        quote.bid_no = m.group(1).strip()
+    m = re.search(r'Job Name[:\s]*\n?\s*([^\n\r]+)', text, re.IGNORECASE)
+    if m:
+        val = m.group(1).strip()
+        if val.lower() not in ('job name', ''):
+            quote.job_name = val
+    m = re.search(r'PO\s*#[:\s]*\n?\s*([^\n\r]+)', text, re.IGNORECASE)
+    if m:
+        val = m.group(1).strip()
+        if val.lower() not in ('po #', 'po#', ''):
+            quote.cust_po = val
+    m = re.search(r'Subtotal[:\s]*\$?([\d,]+\.\d{2})', text)
+    if m:
+        quote.net_total = float(m.group(1).replace(',', ''))
+    line_re = re.compile(
+        r'^\d+\s+([A-Z0-9\-]+)\s+(.+?)\s+\$([\d.]+)\s+per\s+([A-Z]+)\s+(\d+(?:\.\d+)?)\s+\$([\d,]+\.\d+)',
+        re.MULTILINE | re.IGNORECASE
+    )
+    for m in line_re.finditer(text):
+        quote.line_items.append(QuoteLineItem(
+            part_no=m.group(1).strip(), description=m.group(2).strip(),
+            qty=float(m.group(5)), unit_price=float(m.group(3)),
+            unit_of_measure=m.group(4).upper(), raw_price=float(m.group(3)),
+            total=float(m.group(6).replace(',', '')),
+        ))
+    return quote
+
+
+def _parse_proposal(text: str) -> FergusonQuote:
     """
-    Parse the online Draft Quote format from ferguson.com.
-    Example: Draft Quote #: DQ01488299
-    Line items: {#} {product_code} {description} ${price} per {UNIT} {qty} ${total}
+    Parse Bid ID BPLB proposal format.
+    Part numbers always contain at least one digit (e.g. A3703001020, PFTSCOF2000WH).
+    Line format: PARTNO  MFR  DESCRIPTION  QTY  U/M  $UNIT  $EXT
     """
     quote = FergusonQuote()
 
-    dq_match = re.search(r'Draft Quote\s*#[:\s]+([A-Z0-9]+)', text, re.IGNORECASE)
-    if dq_match:
-        quote.bid_no = dq_match.group(1).strip()
+    m = re.search(r'Bid\s+ID\s+([A-Z0-9]+)', text, re.IGNORECASE)
+    if m:
+        quote.bid_no = m.group(1).strip()
 
-    job_match = re.search(r'Job Name[:\s]*\n?\s*([^\n\r]+)', text, re.IGNORECASE)
-    if job_match:
-        val = job_match.group(1).strip()
-        if val.lower() not in ('job name', ''):
-            quote.job_name = val
+    m = re.search(r'Job Name\s+(.+?)(?:\s+Salesperson|\n|Location)', text, re.IGNORECASE)
+    if m:
+        quote.job_name = m.group(1).strip()
 
-    po_match = re.search(r'PO\s*#[:\s]*\n?\s*([^\n\r]+)', text, re.IGNORECASE)
-    if po_match:
-        val = po_match.group(1).strip()
-        if val.lower() not in ('po #', 'po#', ''):
-            quote.cust_po = val
+    subtotals = re.findall(r'Subtotal:\s*\$?([\d,]+\.\d{2})', text, re.IGNORECASE)
+    if subtotals:
+        try:
+            quote.net_total = sum(float(s.replace(',', '')) for s in subtotals)
+        except ValueError:
+            pass
 
-    subtotal_match = re.search(r'Subtotal[:\s]*\$?([\d,]+\.\d{2})', text)
-    if subtotal_match:
-        quote.net_total = float(subtotal_match.group(1).replace(',', ''))
-
-    # Line items: {#} {product_code} {desc} ${price} per {UNIT} {qty} ${total}
+    # Part numbers contain at least one digit — avoids matching plain words like STANDARD
     line_re = re.compile(
-        r'^\d+\s+'                          # line number
-        r'([A-Z0-9\-]+)\s+'                 # product code
-        r'(.+?)\s+'                         # description
-        r'\$([\d.]+)\s+per\s+([A-Z]+)\s+'  # price per unit
-        r'(\d+(?:\.\d+)?)\s+'               # qty
-        r'\$([\d,]+\.\d+)',                 # total
+        r'^([A-Z][A-Z0-9\-\.\/]*\d[A-Z0-9\-\.\/]*)\s+'   # part_no (must have a digit)
+        r'(?:[A-Z]{2,15}\s+)'                              # manufacturer (skip)
+        r'(.+?)\s+'                                        # description
+        r'(\d+(?:\.\d+)?)\s+'                              # qty
+        r'(EA|LF|FT|PR|BX|PK|C|SF|LS|EA)\s+'             # UOM
+        r'\$([\d,]+\.\d{2})\s+'                           # unit price
+        r'\$([\d,]+\.\d{2})',                              # ext price
         re.MULTILINE | re.IGNORECASE
     )
-
     for m in line_re.finditer(text):
-        part_no     = m.group(1).strip()
-        description = m.group(2).strip()
-        unit_price  = float(m.group(3))
-        um          = m.group(4).upper()
-        qty         = float(m.group(5))
-        total       = float(m.group(6).replace(',', ''))
+        try:
+            quote.line_items.append(QuoteLineItem(
+                part_no=m.group(1).strip(),
+                description=m.group(2).strip(),
+                qty=float(m.group(3)),
+                unit_price=float(m.group(5).replace(',', '')),
+                unit_of_measure=m.group(4).upper(),
+                raw_price=float(m.group(5).replace(',', '')),
+                total=float(m.group(6).replace(',', '')),
+            ))
+        except (ValueError, IndexError):
+            continue
 
+    # Fallback
+    if not quote.line_items and quote.net_total > 0:
         quote.line_items.append(QuoteLineItem(
-            part_no=part_no,
-            description=description,
-            qty=qty,
-            unit_price=unit_price,
-            unit_of_measure=um,
-            raw_price=unit_price,
-            total=total,
+            part_no="SEE-QUOTE",
+            description=f"Ferguson Enterprises Quote {quote.bid_no} - see attached PDF",
+            qty=1, unit_price=quote.net_total, unit_of_measure="EA",
+            raw_price=quote.net_total, total=quote.net_total,
         ))
 
     return quote
 
 
 def parse(text: str) -> Optional[FergusonQuote]:
-    """
-    Parse a Ferguson price quotation from extracted PDF text.
-    Returns a FergusonQuote or None if parsing fails.
-    """
-    quote = FergusonQuote()
-
-    # --- Handle online Draft Quote format ---
     if _is_online_quote(text):
         return _parse_online(text)
+    if _is_proposal_quote(text):
+        return _parse_proposal(text)
 
-    # --- Branch Price Quotation fields ---
-    bid_match = re.search(r'Bid No[:\s]+([A-Z0-9]+)', text)
-    if bid_match:
-        quote.bid_no = bid_match.group(1).strip()
+    # Branch Price Quotation format
+    quote = FergusonQuote()
+    m = re.search(r'Bid No[:\s]+([A-Z0-9]+)', text)
+    if m:
+        quote.bid_no = m.group(1).strip()
+    m = re.search(r'Bid Date[:\s]+(\d{2}/\d{2}/\d{2,4})', text)
+    if m:
+        quote.bid_date = m.group(1).strip()
+    m = re.search(r'Cust PO#[:\s]*([^\n\r]+)', text)
+    if m:
+        quote.cust_po = m.group(1).strip()
+    m = re.search(r'Job Name[:\s]*([^\n\r]+)', text)
+    if m:
+        quote.job_name = m.group(1).strip()
+    m = re.search(r'Net Total[:\s]*\$?([\d,]+\.?\d*)', text)
+    if m:
+        quote.net_total = float(m.group(1).replace(',', ''))
 
-    date_match = re.search(r'Bid Date[:\s]+(\d{2}/\d{2}/\d{2,4})', text)
-    if date_match:
-        quote.bid_date = date_match.group(1).strip()
-
-    # Cust PO# — may be blank
-    po_match = re.search(r'Cust PO#[:\s]*([^\n\r]+)', text)
-    if po_match:
-        quote.cust_po = po_match.group(1).strip()
-
-    # Job Name
-    job_match = re.search(r'Job Name[:\s]*([^\n\r]+)', text)
-    if job_match:
-        quote.job_name = job_match.group(1).strip()
-
-    # Net Total
-    net_match = re.search(r'Net Total[:\s]*\$?([\d,]+\.?\d*)', text)
-    if net_match:
-        quote.net_total = float(net_match.group(1).replace(',', ''))
-
-    # --- Line items ---
-    # Find the table between the column header row and "Net Total:"
     table_match = re.search(
         r'Item\s+Description\s+Quantity\s+Net Price\s+UM\s+Total\s*\n(.*?)Net Total',
         text, re.DOTALL
     )
-    if not table_match:
-        return quote   # Return partial quote with header info even if table fails
+    if table_match:
+        line_pattern = re.compile(
+            r'^([A-Z0-9\-]+)\s+(.+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+([A-Z]+)\s+([\d,]+(?:\.\d+)?)',
+            re.MULTILINE
+        )
+        for m in line_pattern.finditer(table_match.group(1)):
+            raw_price = float(m.group(4))
+            um = m.group(5).upper()
+            unit_price = raw_price / 100.0 if um == 'C' else raw_price
+            quote.line_items.append(QuoteLineItem(
+                part_no=m.group(1).strip(), description=m.group(2).strip(),
+                qty=float(m.group(3)), unit_price=unit_price,
+                unit_of_measure=um, raw_price=raw_price,
+                total=float(m.group(6).replace(',', '')),
+            ))
 
-    table_text = table_match.group(1)
-
-    # Each line: PARTNO  DESCRIPTION  QTY  PRICE  UM  TOTAL
-    # Part numbers are alphanumeric, no spaces. Description runs until numbers.
-    line_pattern = re.compile(
-        r'^([A-Z0-9\-]+)\s+'          # Part number
-        r'(.+?)\s+'                    # Description (greedy, trimmed)
-        r'(\d+(?:\.\d+)?)\s+'          # Quantity
-        r'(\d+(?:\.\d+)?)\s+'          # Net Price
-        r'([A-Z]+)\s+'                 # Unit of measure
-        r'([\d,]+(?:\.\d+)?)',         # Total
-        re.MULTILINE
-    )
-
-    for m in line_pattern.finditer(table_text):
-        part_no     = m.group(1).strip()
-        description = m.group(2).strip()
-        qty         = float(m.group(3))
-        raw_price   = float(m.group(4))
-        um          = m.group(5).upper()
-        total       = float(m.group(6).replace(',', ''))
-
-        # Normalize price to per-unit
-        if um == 'C':
-            unit_price = raw_price / 100.0
-        else:
-            unit_price = raw_price
-
+    if not quote.line_items and quote.net_total > 0:
         quote.line_items.append(QuoteLineItem(
-            part_no=part_no,
-            description=description,
-            qty=qty,
-            unit_price=unit_price,
-            unit_of_measure=um,
-            raw_price=raw_price,
-            total=total,
+            part_no="SEE-QUOTE",
+            description=f"Ferguson Enterprises Quote {quote.bid_no} - see attached PDF",
+            qty=1, unit_price=quote.net_total, unit_of_measure="EA",
+            raw_price=quote.net_total, total=quote.net_total,
         ))
 
     return quote
-
-
-# ---------------------------------------------------------------------------
-# Quick test — run directly to verify against a live PDF
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    import sys, pdfplumber, json
-
-    if len(sys.argv) < 2:
-        print("Usage: python ferguson.py path/to/quote.pdf")
-        sys.exit(1)
-
-    with pdfplumber.open(sys.argv[1]) as pdf:
-        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-
-    if not can_parse(text):
-        print("Not a Ferguson quote.")
-        sys.exit(1)
-
-    q = parse(text)
-    print(f"Vendor:    {q.vendor}")
-    print(f"Bid No:    {q.bid_no}")
-    print(f"Cust PO#:  {q.cust_po or '(blank — new PO)'}")
-    print(f"Job:       {q.job_name}")
-    print(f"Date:      {q.bid_date}")
-    print(f"Net Total: ${q.net_total:,.2f}")
-    print(f"\nLine Items ({len(q.line_items)}):")
-    for i, item in enumerate(q.line_items, 1):
-        print(f"  {i:2}. {item.part_no:<20} {item.description:<40} "
-              f"qty={item.qty}  unit=${item.unit_price:.4f}  total=${item.total:.2f}")
