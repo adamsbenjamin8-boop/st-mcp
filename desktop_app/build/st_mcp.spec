@@ -53,9 +53,8 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
+    [],
+    [],
     [],
     name="ST_MCP_Launcher",
     debug=False,
@@ -72,4 +71,16 @@ exe = EXE(
     entitlements_file=None,
     icon=None,               # Add icon path here once you have one: "assets\\icon.ico"
     version=None,            # Add version file here: "build\\version_info.txt"
+)
+
+# onedir: all dependencies in dist\ST_MCP_Launcher\ — no temp extraction, no AV issues
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name="ST_MCP_Launcher",
 )

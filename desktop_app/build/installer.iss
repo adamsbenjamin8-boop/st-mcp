@@ -37,11 +37,11 @@ Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\s
 Filename: "python.exe"; Parameters: "-m pip install mcp httpx pdfplumber --quiet"; \
   Description: "Installing Python dependencies"; \
   Flags: runhidden waituntilterminated
-Filename: "{app}\{#AppExeName}"; Description: "Launch ST MCP Connector"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\launcher\{#AppExeName}"; Description: "Launch ST MCP Connector"; Flags: nowait postinstall skipifsilent
 
 [Files]
-; Main launcher executable (built by PyInstaller)
-Source: "..\dist\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; Launcher + all PyInstaller dependencies — onedir, no temp extraction
+Source: "..\dist\ST_MCP_Launcher\*"; DestDir: "{app}\launcher"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; The MCP script files — these get updated in-place by the auto-updater
 Source: "..\..\servicetitan_writer.py"; DestDir: "{app}"; Flags: ignoreversion
@@ -68,23 +68,28 @@ Source: "..\..\quote_app\teams_notifier.py";   DestDir: "{app}\quote_app"; Flags
 Source: "..\..\quote_app\smartsheet_logger.py"; DestDir: "{app}\quote_app"; Flags: ignoreversion
 Source: "..\..\quote_app\quote_processor.py";  DestDir: "{app}\quote_app"; Flags: ignoreversion
 Source: "..\..\quote_app\folder_watcher.py";   DestDir: "{app}\quote_app"; Flags: ignoreversion
-Source: "..\..\quote_app\email_monitor.py";   DestDir: "{app}\quote_app"; Flags: ignoreversion
-Source: "..\..\quote_app\claude_parser.py";  DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\email_monitor.py";    DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\claude_parser.py";    DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\approved_senders.py"; DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\parser_quality.py";   DestDir: "{app}\quote_app"; Flags: ignoreversion
+Source: "..\..\quote_app\parser_failures.py";  DestDir: "{app}\quote_app"; Flags: ignoreversion
 
 ; Vendor parsers
-Source: "..\..\quote_parsers\__init__.py";     DestDir: "{app}\quote_parsers"; Flags: ignoreversion
-Source: "..\..\quote_parsers\ferguson.py";     DestDir: "{app}\quote_parsers"; Flags: ignoreversion
-Source: "..\..\quote_parsers\johnstone.py";    DestDir: "{app}\quote_parsers"; Flags: ignoreversion
-Source: "..\..\quote_parsers\fwwebb.py";       DestDir: "{app}\quote_parsers"; Flags: ignoreversion
-Source: "..\..\quote_parsers\generic_csv.py";  DestDir: "{app}\quote_parsers"; Flags: ignoreversion
+Source: "..\..\quote_parsers\__init__.py";              DestDir: "{app}\quote_parsers"; Flags: ignoreversion
+Source: "..\..\quote_parsers\ferguson.py";              DestDir: "{app}\quote_parsers"; Flags: ignoreversion
+Source: "..\..\quote_parsers\johnstone.py";             DestDir: "{app}\quote_parsers"; Flags: ignoreversion
+Source: "..\..\quote_parsers\fwwebb.py";                DestDir: "{app}\quote_parsers"; Flags: ignoreversion
+Source: "..\..\quote_parsers\generic_csv.py";           DestDir: "{app}\quote_parsers"; Flags: ignoreversion
+Source: "..\..\quote_parsers\tunstall_corporation.py";  DestDir: "{app}\quote_parsers"; Flags: ignoreversion
+Source: "..\..\quote_parsers\plumbers_supply_co.py";    DestDir: "{app}\quote_parsers"; Flags: ignoreversion
 
 [Icons]
 ; Start menu shortcut
-Name: "{group}\{#AppName}";        Filename: "{app}\{#AppExeName}"
+Name: "{group}\{#AppName}";        Filename: "{app}\launcher\{#AppExeName}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 
 ; Desktop shortcut (optional — user can skip)
-Name: "{autodesktop}\{#AppName}";  Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}";  Filename: "{app}\launcher\{#AppExeName}"; Tasks: desktopicon
 
 [Dirs]
 ; Create the C:\ST\ directory so the cache database has a home on every computer
@@ -97,7 +102,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 ; Auto-start with Windows (current user, no admin needed)
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
   ValueType: string; ValueName: "{#AppName}"; \
-  ValueData: """{app}\{#AppExeName}"""; \
+  ValueData: """{app}\launcher\{#AppExeName}"""; \
   Flags: uninsdeletevalue
 
 [UninstallRun]
