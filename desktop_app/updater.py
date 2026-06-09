@@ -142,14 +142,16 @@ def apply_script_update(result: UpdateResult,
 
     updated = []
     for filename in UPDATE_FILES:
-        # Find matching asset URL
-        url = next((u for u in result.assets if u.endswith(filename)), None)
+        # GitHub release assets use basename only (directory paths are stripped).
+        # Match by basename so quote_app/ and quote_parsers/ files are found.
+        basename = filename.split("/")[-1]
+        url = next((u for u in result.assets if u.split("/")[-1] == basename), None)
         if not url:
             log(f"  Skipped {filename} — not in release assets")
             continue
 
-        # Verify we have a checksum for this file
-        expected_hash = checksums.get(filename)
+        # Checksums file also uses basenames — look up by basename.
+        expected_hash = checksums.get(basename)
         if not expected_hash:
             log(f"  ERROR: No checksum for {filename} — skipping for security.")
             return False
