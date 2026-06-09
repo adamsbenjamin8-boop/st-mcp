@@ -109,6 +109,35 @@ def log_quote(
     ], "toBottom": True}])
 
 
+def log_parser_issue(
+    vendor_name: str,
+    filename: str,
+    parsed_by: str,
+    issues: list,
+    computed_total: float,
+    stated_total: float,
+    items_extracted: int,
+    pdf_text_preview: str,
+) -> bool:
+    """Write a quality-failure row to the Quote Parser Log sheet."""
+    issue_str = "; ".join(issues) if issues else "unknown"
+    notes = (
+        f"QUALITY ISSUE: {issue_str} | "
+        f"Computed: ${computed_total:,.2f} | "
+        f"Stated: ${stated_total:,.2f} | "
+        f"PDF chars: {len(pdf_text_preview)}"
+    )
+    return _add_rows(QUOTE_PARSER_LOG_SHEET, [{"cells": [
+        {"columnId": QLOG_COL_VENDOR,       "value": vendor_name},
+        {"columnId": QLOG_COL_DATE,         "value": date.today().isoformat()},
+        {"columnId": QLOG_COL_FILE,         "value": filename},
+        {"columnId": QLOG_COL_PARSED_BY,    "value": parsed_by},
+        {"columnId": QLOG_COL_PARSER_ADDED, "value": False},
+        {"columnId": QLOG_COL_ITEMS,        "value": str(items_extracted)},
+        {"columnId": QLOG_COL_NOTES,        "value": notes},
+    ], "toBottom": True}])
+
+
 # ---------------------------------------------------------------------------
 # Missing Parts Queue
 # ---------------------------------------------------------------------------

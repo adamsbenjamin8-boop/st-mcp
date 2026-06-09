@@ -10,16 +10,21 @@ from pathlib import Path
 from typing import Optional
 from config import PROCESSED_FOLDER
 from vendor_router import detect_and_parse
-from claude_parser import parse_with_claude
+from claude_parser import parse_with_claude, parse_with_claude_retry, maybe_regenerate_parser
+from parser_quality import check_parse_quality
+from parser_failures import record_failure, record_success
 from st_client import (
     find_vendor_id, find_job_id, get_default_po_type_id,
     create_po_with_items, add_items_to_existing_po,
     find_existing_po_on_job, get_po_display_number, get_po_url,
-    extract_job_reference,
+    extract_job_reference, extract_job_reference_strict,
     DEFAULT_JOB_ID, DEFAULT_BUSINESS_UNIT_ID,
 )
 from teams_notifier import send_po_notification
-from smartsheet_logger import log_quote, log_missing_parts, log_unknown_vendor
+from smartsheet_logger import log_quote, log_missing_parts, log_unknown_vendor, log_parser_issue
+
+_LARGE_QUOTE_THRESHOLD = 500_000.0  # Teams warning added when quote total exceeds this
+
 
 def process_quote_file(file_path: str, workflow: str = "po") -> dict:
     path = Path(file_path)
@@ -71,6 +76,47 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
 
         print(f"  ✓ {len(items)} line items extracted")
 
+        # Quality check — validate parse result before creating PO
+        pdf_text     = _extract_pdf_text(file_path)
+        _quote_total = float(
+            getattr(parsed, 'net_total', None) or
+            getattr(parsed, 'total', None)     or
+            getattr(parsed, 'amount_due', None) or 0
+        )
+        quality = check_parse_quality(items, _quote_total, pdf_text)
+
+        if not quality["passed"]:
+            if not quality["is_image_pdf"] and parsed_by_label == "Claude AI":
+                print(f"  ⚠ Quality check failed {quality['issues']} — retrying with Claude…")
+                retry = parse_with_claude_retry(path, vendor_name, quality)
+                if retry is not None:
+                    parsed           = retry
+                    items            = getattr(parsed, 'line_items', [])
+                    result["item_count"] = len(items)
+                    parsed_by_label  = "Claude AI (retry)"
+                    _quote_total     = float(
+                        getattr(parsed, 'net_total', None) or
+                        getattr(parsed, 'total', None)     or
+                        getattr(parsed, 'amount_due', None) or 0
+                    )
+                    quality = check_parse_quality(items, _quote_total, pdf_text)
+
+        if quality["passed"]:
+            record_success(vendor_name)
+        else:
+            record_failure(vendor_name, "; ".join(quality["issues"]))
+            log_parser_issue(
+                vendor_name=vendor_name or "Unknown",
+                filename=path.name,
+                parsed_by=parsed_by_label,
+                issues=quality["issues"],
+                computed_total=quality.get("computed_total", 0.0),
+                stated_total=_quote_total,
+                items_extracted=len(items),
+                pdf_text_preview=pdf_text,
+            )
+            maybe_regenerate_parser(vendor_name or "", path)
+
         # Step 2: Vendor lookup (3-tier)
         vendor_id, vendor_st_name, vendor_exact = find_vendor_id(vendor_name)
         if vendor_exact:
@@ -85,7 +131,6 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
                                email_domain="", vendor_contact_email=email_sender)
 
         # Step 3: Extract job reference — numeric only
-        pdf_text = _extract_pdf_text(file_path)
         # Only use job_name/cust_po as job ref if numeric — non-numeric values like
         # "NANTUCKET" or "DENOMMEE PLUMBING" are project names, not job numbers.
         # Fall through to email subject/body/pdf which vendors put the job number in.
@@ -94,11 +139,11 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
         _job_name_numeric = _job_name.strip() if _job_name.strip().isdigit() else ''
         _cust_po_numeric  = _cust_po.strip()  if _cust_po.strip().isdigit()  else ''
         job_ref  = (
-            _job_name_numeric                    or
-            _cust_po_numeric                     or
-            extract_job_reference(email_subject) or
-            extract_job_reference(email_body)    or
-            extract_job_reference(pdf_text)      or ''
+            _job_name_numeric                           or
+            _cust_po_numeric                            or
+            extract_job_reference(email_subject)        or
+            extract_job_reference(email_body)           or
+            extract_job_reference_strict(pdf_text)      or ''
         )
         po_ref = (getattr(parsed, 'cust_po', '') or
                   getattr(parsed, 'bid_no', '')  or
@@ -128,8 +173,11 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
         memo_parts = []
         if po_ref:
             memo_parts.append(f"Quote Ref: {po_ref}")
-        if job_ref and using_default_job:
-            memo_parts.append(f"Job ref on quote: {job_ref} — assign before approving")
+        if using_default_job:
+            if job_ref:
+                memo_parts.append(f"Job ref on quote: {job_ref} — assign before approving")
+            else:
+                memo_parts.append("DEFAULT JOB — no job reference found — assign before approving")
         if email_sender:
             memo_parts.append(f"From: {email_sender}")
         memo = " | ".join(memo_parts)
@@ -189,10 +237,9 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
                 print(f"  ⚠  Could not log missing parts: {e}")
 
         # Step 8: Teams notification
-        total = (getattr(parsed, 'net_total', 0.0) or
-                 getattr(parsed, 'total', 0.0)     or
-                 getattr(parsed, 'amount_due', 0.0))
-        teams_notes = memo if using_default_job and job_ref else ""
+        total = _quote_total
+        _large_quote = f"⚠ Large quote: ${total:,.2f} — verify before approving" if total > _LARGE_QUOTE_THRESHOLD else ""
+        teams_notes = " | ".join(filter(None, [memo if using_default_job else "", _large_quote]))
         sent = send_po_notification(
             vendor=vendor_name,
             vendor_matched=vendor_exact,

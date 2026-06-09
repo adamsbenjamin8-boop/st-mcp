@@ -20,6 +20,8 @@ UPDATE_FILES = [
     "quote_app/email_monitor.py",
     "quote_app/claude_parser.py",
     "quote_app/approved_senders.py",
+    "quote_app/parser_quality.py",
+    "quote_app/parser_failures.py",
     # Vendor parsers — add new vendors here
     "quote_parsers/__init__.py",
     "quote_parsers/ferguson.py",

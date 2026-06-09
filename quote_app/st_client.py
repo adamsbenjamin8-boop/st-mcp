@@ -199,8 +199,9 @@ def extract_job_reference(text: str) -> Optional[str]:
     for pattern in [
         r'job\s*#?\s*(\d{5,})',
         r'job\s*number\s*:?\s*(\d{5,})',
-        r'work\s*order\s*#?\s*(\d{5,})',
-        r'wo\s*#?\s*(\d{5,})',
+        r'job\s*no\.?\s*:?\s*(\d{5,})',
+        r'work\s*order\s*[:#]?\s*(\d{5,})',
+        r'\bwo\s*[:#]?\s*(\d{5,})',
         r'po\s*#?\s*([\d]{5,}(?:-\d+)?)',
         r'#\s*(\d{6,})',
     ]:
@@ -213,6 +214,28 @@ def extract_job_reference(text: str) -> Optional[str]:
     m = re.search(r'\b(\d{9,12})\b', text)
     if m:
         return m.group(1)
+    return None
+
+
+def extract_job_reference_strict(text: str) -> Optional[str]:
+    """
+    Only match unambiguous keyword-prefixed job/work-order patterns.
+    Use this on raw PDF text which is noisy (phone numbers, catalog codes,
+    quote numbers, etc. all look like 9-12 digit numbers).
+    Does NOT fall back to bare-number matching.
+    """
+    if not text:
+        return None
+    for pattern in [
+        r'job\s*#?\s*(\d{5,})',
+        r'job\s*number\s*:?\s*(\d{5,})',
+        r'job\s*no\.?\s*:?\s*(\d{5,})',
+        r'work\s*order\s*[:#]?\s*(\d{5,})',
+        r'\bwo\s*[:#]?\s*(\d{5,})',
+    ]:
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            return m.group(1).replace('-', '')
     return None
 
 # ---------------------------------------------------------------------------

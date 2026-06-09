@@ -279,6 +279,175 @@ def _self_test_parser(parser_path: Path, module_stem: str,
         return False
 
 
+def parse_with_claude_retry(
+    pdf_path: Path, vendor_name: str, quality_result: dict
+) -> "Optional[ParsedQuote]":
+    """
+    Re-attempt parsing with a targeted prompt based on the quality failure type.
+    Returns a ParsedQuote only if the retry result passes quality checks; None otherwise.
+    Image PDFs are not retried.
+    """
+    if not ANTHROPIC_API_KEY:
+        return None
+
+    if quality_result.get("is_image_pdf"):
+        return None
+
+    try:
+        import pdfplumber
+        with pdfplumber.open(str(pdf_path)) as pdf:
+            pdf_text = "\n".join(p.extract_text() or "" for p in pdf.pages)
+    except Exception:
+        return None
+
+    issues = quality_result.get("issues", [])
+    if "reconciliation_gap" in issues:
+        extra_guidance = (
+            "\n\nIMPORTANT: A previous attempt had a significant total mismatch. "
+            "Re-read carefully — you may have missed line items or confused a subtotal with the grand total. "
+            "Include EVERY line item on the quote."
+        )
+    elif "missing_unit_prices" in issues:
+        extra_guidance = (
+            "\n\nIMPORTANT: A previous attempt was missing unit prices on some items. "
+            "Re-read carefully — every item must have a unit_price > 0. "
+            "If only an extended price is shown, divide by quantity."
+        )
+    else:
+        extra_guidance = (
+            "\n\nIMPORTANT: Re-read carefully and ensure description, qty, and unit_price "
+            "are populated for every line item."
+        )
+
+    prompt = f"""You are a purchase order data extractor. Extract the following from this vendor quote:
+1. Vendor name (company name on the quote)
+2. Quote/bid number
+3. Customer PO number (if present - may be blank or a job name)
+4. Job name (if present)
+5. All line items with: part number, description, quantity, unit price, extended price, unit of measure
+
+Return ONLY a JSON object with this exact structure:
+{{
+  "vendor": "string",
+  "quote_no": "string",
+  "cust_po": "string",
+  "job_name": "string",
+  "total": 0.00,
+  "line_items": [
+    {{
+      "part_no": "string",
+      "description": "string",
+      "qty": 0,
+      "unit_price": 0.00,
+      "uom": "EA",
+      "ext_price": 0.00
+    }}
+  ]
+}}{extra_guidance}
+
+QUOTE TEXT:
+{pdf_text[:8000]}"""
+
+    try:
+        resp = httpx.post(
+            ANTHROPIC_URL,
+            headers={
+                "x-api-key":         ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            },
+            json={
+                "model":      MODEL,
+                "max_tokens": 2048,
+                "messages":   [{"role": "user", "content": prompt}],
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        content = resp.json()["content"][0]["text"]
+    except Exception as e:
+        print(f"  Claude retry API error: {e}")
+        return None
+
+    json_match = re.search(r'\{.*\}', content, re.DOTALL)
+    if not json_match:
+        return None
+
+    try:
+        data = json.loads(json_match.group())
+    except json.JSONDecodeError:
+        return None
+
+    quote = ParsedQuote(
+        vendor=data.get("vendor", vendor_name),
+        quote_no=data.get("quote_no", ""),
+        cust_po=data.get("cust_po", ""),
+        job_name=data.get("job_name", ""),
+        total=float(data.get("total", 0) or 0),
+    )
+    for item in data.get("line_items", []):
+        try:
+            quote.line_items.append(LineItem(
+                part_no=str(item.get("part_no", "")),
+                description=str(item.get("description", "")),
+                qty=float(item.get("qty", 1) or 1),
+                unit_price=float(item.get("unit_price", 0) or 0),
+                uom=str(item.get("uom", "EA")),
+                ext_price=float(item.get("ext_price", 0) or 0),
+            ))
+        except (ValueError, TypeError):
+            continue
+
+    print(f"  Claude retry extracted {len(quote.line_items)} items")
+
+    from parser_quality import check_parse_quality
+    retry_quality = check_parse_quality(quote.line_items, quote.total, pdf_text)
+    if retry_quality["passed"]:
+        return quote
+    print(f"  Claude retry still failed quality: {retry_quality['issues']}")
+    return None
+
+
+def maybe_regenerate_parser(vendor_name: str, pdf_path: Path) -> bool:
+    """
+    Delete and regenerate the saved parser for vendor_name if the consecutive failure
+    threshold has been reached.  Resets the failure count after the attempt.
+    Returns True if regeneration was attempted, False otherwise.
+    """
+    if not vendor_name:
+        return False
+
+    from parser_failures import should_regenerate_parser, record_success
+
+    if not should_regenerate_parser(vendor_name):
+        return False
+
+    safe_name   = re.sub(r'[^a-z0-9]', '_', vendor_name.lower()).strip('_')
+    parser_path = PARSERS_DIR / f"{safe_name}.py"
+
+    if parser_path.exists():
+        try:
+            parser_path.unlink()
+            print(f"  Auto-regen: deleted broken parser for {vendor_name}")
+        except Exception as e:
+            print(f"  Auto-regen: could not delete parser for {vendor_name}: {e}")
+            return False
+    else:
+        print(f"  Auto-regen: no parser on disk for {vendor_name} — generating from scratch")
+
+    try:
+        import pdfplumber
+        with pdfplumber.open(str(pdf_path)) as pdf:
+            pdf_text = "\n".join(p.extract_text() or "" for p in pdf.pages)
+    except Exception:
+        return False
+
+    _save_parser(vendor_name, pdf_text)
+    record_success(vendor_name)
+    print(f"  Auto-regen: generation attempted for {vendor_name} — failure count reset")
+    return True
+
+
 def _log_parser_failure(vendor_name: str, reason: str):
     """Log a parser generation failure to Smartsheet for manual follow-up."""
     try:
