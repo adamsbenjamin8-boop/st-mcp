@@ -147,7 +147,7 @@ def log_quote(
         cells.append({
             "columnId":  QLOG_COL_ST_LINK,
             "value":     "View PO",
-            "hyperlink": {"url": f"https://go.servicetitan.com/#/Purchasing/PurchaseOrders/{po_id}"},
+            "hyperlink": {"url": f"https://go.servicetitan.com/#/new/inventory/purchase-orders/details/{po_id}"},
         })
     row_id = _add_rows(QUOTE_PARSER_LOG_SHEET, [{"cells": cells, "toBottom": True}])
     if row_id is not None and pdf_path is not None:
@@ -197,7 +197,7 @@ def log_parser_issue(
         cells.append({
             "columnId":  QLOG_COL_ST_LINK,
             "value":     "View PO",
-            "hyperlink": {"url": f"https://go.servicetitan.com/#/Purchasing/PurchaseOrders/{po_id}"},
+            "hyperlink": {"url": f"https://go.servicetitan.com/#/new/inventory/purchase-orders/details/{po_id}"},
         })
     row_id = _add_rows(QUOTE_PARSER_LOG_SHEET, [{"cells": cells, "toBottom": True}])
     if row_id is not None and pdf_path is not None:
