@@ -28,6 +28,8 @@ UPDATE_FILES = [
     "quote_parsers/johnstone.py",
     "quote_parsers/fwwebb.py",
     "quote_parsers/generic_csv.py",
+    "quote_parsers/tunstall_corporation.py",
+    "quote_parsers/plumbers_supply_co.py",
 ]
 
 
