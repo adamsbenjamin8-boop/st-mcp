@@ -58,7 +58,8 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
             else:
                 log_quote(vendor_name="Unknown", filename=path.name, parsed_by="Claude AI",
                           item_count=0, parser_added=False,
-                          notes="Claude API failed — manual review needed")
+                          notes="Claude API failed — manual review needed",
+                          pdf_path=path)
                 result["error"] = "unknown_vendor"
                 return result
         else:
@@ -114,6 +115,7 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
                 stated_total=_quote_total,
                 items_extracted=len(items),
                 pdf_text_preview=pdf_text,
+                pdf_path=path,
             )
             maybe_regenerate_parser(vendor_name or "", path)
 
@@ -255,9 +257,18 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
         print(f"  {'✓' if sent else '❌'} Teams notification {'sent' if sent else 'failed'}")
 
         # Step 9: Quote Parser Log
-        log_quote(vendor_name=vendor_st_name, filename=path.name,
-                  parsed_by=parsed_by_label, item_count=len(line_items),
-                  parser_added=(parsed_by_label == "Local Parser"))
+        log_quote(
+            vendor_name=vendor_st_name,
+            filename=path.name,
+            parsed_by=parsed_by_label,
+            item_count=len(line_items),
+            parser_added=(parsed_by_label == "Local Parser"),
+            po_number=po_number,
+            po_id=po_id,
+            job_number=job.get("jobNumber") if not using_default_job else None,
+            customer_name=job.get("customerName") if not using_default_job else None,
+            pdf_path=path,
+        )
 
         # Step 10: Move to Processed
         _move_to_processed(path, vendor_st_name, po_ref or path.stem, po_number)

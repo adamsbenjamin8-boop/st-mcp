@@ -6,7 +6,7 @@ import os
 import httpx
 from datetime import date
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 
 def _load_env():
@@ -29,13 +29,17 @@ APPROVED_VENDOR_SHEET   = 1832230987976580
 # ---------------------------------------------------------------------------
 # Quote Parser Log column IDs
 # ---------------------------------------------------------------------------
-QLOG_COL_VENDOR         = 7714584764125060
+QLOG_COL_VENDOR_NAME    = 7714584764125060
 QLOG_COL_DATE           = 2085085229911940
-QLOG_COL_FILE           = 6588684857282436
+QLOG_COL_FILE_NAME      = 6588684857282436
 QLOG_COL_PARSED_BY      = 4336885043597188
 QLOG_COL_PARSER_ADDED   = 8840484670967684
 QLOG_COL_ITEMS          = 255497881292676
 QLOG_COL_NOTES          = 4759097508663172
+QLOG_COL_PO_NUMBER      = 6331607794618244   # already existed
+QLOG_COL_JOB_NUMBER     = 1671217164881796   # new
+QLOG_COL_CUSTOMER_NAME  = 6174816792252292   # new
+QLOG_COL_ST_LINK        = 3923016978567044   # new
 
 # ---------------------------------------------------------------------------
 # Missing Parts Queue column IDs (verified from sheet)
@@ -69,10 +73,11 @@ def _ss_headers() -> dict:
     }
 
 
-def _add_rows(sheet_id: int, rows: list) -> bool:
+def _add_rows(sheet_id: int, rows: list) -> Optional[int]:
+    """Returns the created row ID on success, None on failure."""
     if not os.environ.get("SMARTSHEET_API_KEY"):
         print("WARNING: SMARTSHEET_API_KEY not configured")
-        return False
+        return None
     try:
         resp = httpx.post(
             f"https://api.smartsheet.com/2.0/sheets/{sheet_id}/rows",
@@ -81,10 +86,30 @@ def _add_rows(sheet_id: int, rows: list) -> bool:
             timeout=15,
         )
         resp.raise_for_status()
-        return True
+        return resp.json()["result"][0]["id"]
     except Exception as e:
         print(f"Smartsheet error: {e}")
-        return False
+        return None
+
+
+def _attach_pdf_to_row(row_id: int, pdf_path) -> None:
+    """Attach a PDF file to a Smartsheet row. Failure prints a warning and never raises."""
+    try:
+        api_key = os.environ.get("SMARTSHEET_API_KEY", "")
+        if not api_key:
+            print("WARNING: SMARTSHEET_API_KEY not configured — skipping PDF attachment")
+            return
+        pdf_path = Path(pdf_path)
+        file_bytes = pdf_path.read_bytes()
+        resp = httpx.post(
+            f"https://api.smartsheet.com/2.0/sheets/{QUOTE_PARSER_LOG_SHEET}/rows/{row_id}/attachments",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files={"file": (pdf_path.name, file_bytes, "application/pdf")},
+            timeout=30,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"WARNING: Could not attach PDF to Smartsheet row {row_id}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -97,16 +122,37 @@ def log_quote(
     item_count: int,
     parser_added: bool = False,
     notes: str = "",
+    po_number=None,
+    po_id=None,
+    job_number=None,
+    customer_name=None,
+    pdf_path=None,
 ) -> bool:
-    return _add_rows(QUOTE_PARSER_LOG_SHEET, [{"cells": [
-        {"columnId": QLOG_COL_VENDOR,       "value": vendor_name},
-        {"columnId": QLOG_COL_DATE,         "value": date.today().isoformat()},
-        {"columnId": QLOG_COL_FILE,         "value": filename},
-        {"columnId": QLOG_COL_PARSED_BY,    "value": parsed_by},
-        {"columnId": QLOG_COL_PARSER_ADDED, "value": parser_added},
-        {"columnId": QLOG_COL_ITEMS,        "value": str(item_count)},
-        {"columnId": QLOG_COL_NOTES,        "value": notes},
-    ], "toBottom": True}])
+    cells = [
+        {"columnId": QLOG_COL_VENDOR_NAME,   "value": vendor_name},
+        {"columnId": QLOG_COL_DATE,           "value": date.today().isoformat()},
+        {"columnId": QLOG_COL_FILE_NAME,      "value": filename},
+        {"columnId": QLOG_COL_PARSED_BY,      "value": parsed_by},
+        {"columnId": QLOG_COL_PARSER_ADDED,   "value": parser_added},
+        {"columnId": QLOG_COL_ITEMS,          "value": str(item_count)},
+        {"columnId": QLOG_COL_NOTES,          "value": notes},
+    ]
+    if po_number is not None:
+        cells.append({"columnId": QLOG_COL_PO_NUMBER,     "value": po_number})
+    if job_number is not None:
+        cells.append({"columnId": QLOG_COL_JOB_NUMBER,    "value": job_number})
+    if customer_name is not None:
+        cells.append({"columnId": QLOG_COL_CUSTOMER_NAME, "value": customer_name})
+    if po_id is not None:
+        cells.append({
+            "columnId":  QLOG_COL_ST_LINK,
+            "value":     "View PO",
+            "hyperlink": {"url": f"https://go.servicetitan.com/#/Purchasing/PurchaseOrders/{po_id}"},
+        })
+    row_id = _add_rows(QUOTE_PARSER_LOG_SHEET, [{"cells": cells, "toBottom": True}])
+    if row_id is not None and pdf_path is not None:
+        _attach_pdf_to_row(row_id, pdf_path)
+    return row_id is not None
 
 
 def log_parser_issue(
@@ -118,6 +164,11 @@ def log_parser_issue(
     stated_total: float,
     items_extracted: int,
     pdf_text_preview: str,
+    po_number=None,
+    po_id=None,
+    job_number=None,
+    customer_name=None,
+    pdf_path=None,
 ) -> bool:
     """Write a quality-failure row to the Quote Parser Log sheet."""
     issue_str = "; ".join(issues) if issues else "unknown"
@@ -127,15 +178,31 @@ def log_parser_issue(
         f"Stated: ${stated_total:,.2f} | "
         f"PDF chars: {len(pdf_text_preview)}"
     )
-    return _add_rows(QUOTE_PARSER_LOG_SHEET, [{"cells": [
-        {"columnId": QLOG_COL_VENDOR,       "value": vendor_name},
-        {"columnId": QLOG_COL_DATE,         "value": date.today().isoformat()},
-        {"columnId": QLOG_COL_FILE,         "value": filename},
-        {"columnId": QLOG_COL_PARSED_BY,    "value": parsed_by},
-        {"columnId": QLOG_COL_PARSER_ADDED, "value": False},
-        {"columnId": QLOG_COL_ITEMS,        "value": str(items_extracted)},
-        {"columnId": QLOG_COL_NOTES,        "value": notes},
-    ], "toBottom": True}])
+    cells = [
+        {"columnId": QLOG_COL_VENDOR_NAME,   "value": vendor_name},
+        {"columnId": QLOG_COL_DATE,           "value": date.today().isoformat()},
+        {"columnId": QLOG_COL_FILE_NAME,      "value": filename},
+        {"columnId": QLOG_COL_PARSED_BY,      "value": parsed_by},
+        {"columnId": QLOG_COL_PARSER_ADDED,   "value": False},
+        {"columnId": QLOG_COL_ITEMS,          "value": str(items_extracted)},
+        {"columnId": QLOG_COL_NOTES,          "value": notes},
+    ]
+    if po_number is not None:
+        cells.append({"columnId": QLOG_COL_PO_NUMBER,     "value": po_number})
+    if job_number is not None:
+        cells.append({"columnId": QLOG_COL_JOB_NUMBER,    "value": job_number})
+    if customer_name is not None:
+        cells.append({"columnId": QLOG_COL_CUSTOMER_NAME, "value": customer_name})
+    if po_id is not None:
+        cells.append({
+            "columnId":  QLOG_COL_ST_LINK,
+            "value":     "View PO",
+            "hyperlink": {"url": f"https://go.servicetitan.com/#/Purchasing/PurchaseOrders/{po_id}"},
+        })
+    row_id = _add_rows(QUOTE_PARSER_LOG_SHEET, [{"cells": cells, "toBottom": True}])
+    if row_id is not None and pdf_path is not None:
+        _attach_pdf_to_row(row_id, pdf_path)
+    return row_id is not None
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +229,7 @@ def log_missing_parts(
             {"columnId": MP_COL_STATUS,      "value": "New"},
             {"columnId": MP_COL_DATE_ADDED,  "value": today},
         ], "toBottom": True})
-    return _add_rows(MISSING_PARTS_SHEET_ID, rows)
+    return _add_rows(MISSING_PARTS_SHEET_ID, rows) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -187,4 +254,4 @@ def log_unknown_vendor(
         cells.append({"columnId": AV_COL_VENDOR_CONTACT, "value": vendor_contact_email})
     if notes:
         cells.append({"columnId": AV_COL_NOTES, "value": notes})
-    return _add_rows(APPROVED_VENDOR_SHEET, [{"cells": cells, "toBottom": True}])
+    return _add_rows(APPROVED_VENDOR_SHEET, [{"cells": cells, "toBottom": True}]) is not None
