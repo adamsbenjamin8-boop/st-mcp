@@ -174,11 +174,15 @@ def _save_parser(vendor_name: str, sample_text: str):
 The parser MUST follow these exact requirements:
 
 1. `can_parse(text: str) -> bool`
-   - NEVER rely on just the vendor name - PDF text extraction is inconsistent.
-   - Build a list of 4-6 patterns covering: vendor name variations, phone number,
-     street address, website/domain, city+state, PO box or zip code.
-   - Return: any(re.search(p, text, re.IGNORECASE) for p in patterns)
-   - This ensures matching even when some text is missing or oddly formatted.
+   - The FIRST statement MUST be a hard vendor identity guard:
+       if "<distinctive_vendor_keyword>" not in text.lower(): return False
+     Replace <distinctive_vendor_keyword> with the most distinctive word from
+     the vendor's name (e.g. "buckley", "trane", "ferguson"). This prevents
+     the parser from ever matching a PDF that doesn't mention the vendor.
+   - After that guard you may add 1-2 additional checks for vendor-specific
+     patterns such as their email domain or website (e.g. "@buckleyonline.com").
+   - DO NOT use generic patterns: no zip codes, no street suffixes (Road, Drive),
+     no city/state pairs, no phone number formats — these match too many documents.
 
 2. `parse(text: str)` returning an object with:
    - vendor (str), quote_no (str), cust_po (str), job_name (str)
