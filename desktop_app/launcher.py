@@ -23,8 +23,7 @@ from PIL import Image, ImageDraw
 # Resolve paths
 # ---------------------------------------------------------------------------
 if getattr(sys, "frozen", False):
-    # exe lives in {install}\launcher\ — scripts are one level up in {install}\
-    APP_DIR = Path(sys.executable).parent.parent
+    APP_DIR = Path(sys.executable).parent
 else:
     APP_DIR = Path(__file__).parent.parent
 

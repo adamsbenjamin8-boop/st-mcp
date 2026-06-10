@@ -37,11 +37,11 @@ Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\s
 Filename: "python.exe"; Parameters: "-m pip install mcp httpx pdfplumber --quiet"; \
   Description: "Installing Python dependencies"; \
   Flags: runhidden waituntilterminated
-Filename: "{app}\launcher\{#AppExeName}"; Description: "Launch ST MCP Connector"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Description: "Launch ST MCP Connector"; Flags: nowait postinstall skipifsilent
 
 [Files]
 ; Launcher + all PyInstaller dependencies — onedir, no temp extraction
-Source: "..\dist\ST_MCP_Launcher\*"; DestDir: "{app}\launcher"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\ST_MCP_Launcher\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; The MCP script files — these get updated in-place by the auto-updater
 Source: "..\..\servicetitan_writer.py"; DestDir: "{app}"; Flags: ignoreversion
@@ -85,11 +85,11 @@ Source: "..\..\quote_parsers\plumbers_supply_co.py";    DestDir: "{app}\quote_pa
 
 [Icons]
 ; Start menu shortcut
-Name: "{group}\{#AppName}";        Filename: "{app}\launcher\{#AppExeName}"
+Name: "{group}\{#AppName}";        Filename: "{app}\{#AppExeName}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 
 ; Desktop shortcut (optional — user can skip)
-Name: "{autodesktop}\{#AppName}";  Filename: "{app}\launcher\{#AppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}";  Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Dirs]
 ; Create the C:\ST\ directory so the cache database has a home on every computer
@@ -102,7 +102,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 ; Auto-start with Windows (current user, no admin needed)
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
   ValueType: string; ValueName: "{#AppName}"; \
-  ValueData: """{app}\launcher\{#AppExeName}"""; \
+  ValueData: """{app}\{#AppExeName}"""; \
   Flags: uninsdeletevalue
 
 [UninstallRun]

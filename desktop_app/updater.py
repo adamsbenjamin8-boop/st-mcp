@@ -32,7 +32,7 @@ from version import APP_VERSION, GITHUB_REPO, UPDATE_FILES
 
 GITHUB_API  = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 TIMEOUT     = 10   # seconds for HTTP requests
-APP_DIR     = Path(sys.executable).parent.parent if getattr(sys, "frozen", False) else Path(__file__).parent.parent
+APP_DIR     = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent.parent
 
 # Tracks the currently-installed version in memory.
 # Updated after each successful install so repeat checks don't re-trigger the same update.
