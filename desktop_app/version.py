@@ -30,7 +30,6 @@ UPDATE_FILES = [
     "quote_parsers/generic_csv.py",
     "quote_parsers/tunstall_corporation.py",
     "quote_parsers/plumbers_supply_co.py",
-    "quote_parsers/buckley_associates.py",
     "quote_parsers/trane_u_s__inc.py",
 ]
 
