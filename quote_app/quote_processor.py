@@ -16,7 +16,7 @@ from parser_failures import record_failure, record_success
 from st_client import (
     find_vendor_id, find_job_id, get_default_po_type_id,
     create_po_with_items, add_items_to_existing_po,
-    find_existing_po_on_job, get_po_display_number, get_po_url,
+    find_existing_po_on_job, get_po_display_number, get_po_url, get_po_total,
     extract_job_reference, extract_job_reference_strict,
     DEFAULT_JOB_ID, DEFAULT_BUSINESS_UNIT_ID,
 )
@@ -230,7 +230,7 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
                 print(f"  ⚠  Could not log missing parts: {e}")
 
         # Step 8: Teams notification
-        total = _quote_total
+        total = get_po_total(po_id) or _quote_total
         _large_quote = f"⚠ Large quote: ${total:,.2f} — verify before approving" if total > _LARGE_QUOTE_THRESHOLD else ""
         teams_notes = " | ".join(filter(None, [memo if using_default_job else "", _large_quote]))
         sent = send_po_notification(

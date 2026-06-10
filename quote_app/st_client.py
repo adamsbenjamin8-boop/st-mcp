@@ -365,5 +365,13 @@ def create_po_with_items(
         print(f"Error creating PO: {e}")
         return None, []
 
+def get_po_total(po_id: int) -> float:
+    """Fetch the actual PO total from ServiceTitan after creation."""
+    try:
+        data = _get(("inventory", f"purchase-orders/{po_id}"), {})
+        return float(data.get("total", 0) or 0)
+    except Exception:
+        return 0.0
+
 def get_po_url(po_id: int) -> str:
     return f"https://go.servicetitan.com/#/new/inventory/purchase-orders/details/{po_id}"
