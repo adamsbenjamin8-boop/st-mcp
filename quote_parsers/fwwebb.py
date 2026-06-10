@@ -55,7 +55,7 @@ class QuoteLineItem:
 
 @dataclass
 class WebbQuote:
-    vendor: str = "F.W. Webb Company"
+    vendor: str = "F.W. Webb"
     quote_no: str = ""
     quote_date: str = ""
     cust_po: str = ""     # Usually job/customer name
@@ -85,6 +85,7 @@ def _parse_cart(text: str) -> WebbQuote:
     NOTE: Prefer CSV over this format when both are available.
     """
     quote = WebbQuote()
+    quote.vendor = "F.W. Webb"
 
     cart_match = re.search(r'Cart\s*#[:\s]+([A-Z0-9\-]+)', text, re.IGNORECASE)
     if cart_match:
@@ -178,6 +179,7 @@ def parse(text: str) -> Optional[WebbQuote]:
         return _parse_cart(text)
 
     quote = WebbQuote()
+    quote.vendor = "F.W. Webb"
 
     # Quote number (labeled "Number" on the form, appears near date)
     qn_match = re.search(r'(?:Quote\s+)?Number\s*\n?\s*(\d{7,})', text, re.IGNORECASE)

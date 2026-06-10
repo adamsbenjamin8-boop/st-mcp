@@ -30,6 +30,7 @@ _docs = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "OneDrive - Deno
 QUOTES_INBOX_FOLDER    = _docs / "Purchasing" / "Incoming Quotes"
 ESTIMATES_INBOX_FOLDER = _docs / "Purchasing" / "Incoming Estimates"
 PROCESSED_FOLDER       = _docs / "Purchasing" / "Processed"
+QUARANTINE_DIR         = _docs / "Purchasing" / "Quarantine"
 
 # ---------------------------------------------------------------------------
 # Teams — Incoming Webhook URL for Purchasing channel notifications

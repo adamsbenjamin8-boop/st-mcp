@@ -3,7 +3,7 @@ Version tracking for the ST MCP Desktop App.
 This file is updated automatically by the GitHub Actions release workflow.
 """
 
-APP_VERSION = "2.32"
+APP_VERSION = "2.33"
 GITHUB_REPO  = "adamsbenjamin8-boop/st-mcp"
 UPDATE_FILES = [
     "servicetitan_writer.py",

@@ -8,7 +8,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from config import PROCESSED_FOLDER
+from config import PROCESSED_FOLDER, QUARANTINE_DIR
 from vendor_router import detect_and_parse
 from claude_parser import parse_with_claude, parse_with_claude_retry, maybe_regenerate_parser
 from parser_quality import check_parse_quality
@@ -24,6 +24,12 @@ from teams_notifier import send_po_notification
 from smartsheet_logger import log_quote, log_missing_parts, log_unknown_vendor, log_parser_issue
 
 _LARGE_QUOTE_THRESHOLD = 500_000.0  # Teams warning added when quote total exceeds this
+
+# Matches "ORDER ACKNOWLEDGEMENT" and F.W. Webb's spaced variant "O R D E R  A C K N O W L E D G E M E N T"
+_ACK_PATTERN = re.compile(
+    r'order\s+a\s*c\s*k\s*n\s*o\s*w\s*l\s*e\s*d\s*g\s*[eo]\s*[md]?\s*e?\s*n?\s*t?',
+    re.IGNORECASE
+)
 
 
 def process_quote_file(file_path: str, workflow: str = "po") -> dict:
@@ -41,6 +47,16 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
     email_sender  = meta.get("sender", "")
 
     try:
+        # Extract PDF text early — used for pre-flight checks and later quality validation
+        pdf_text = _extract_pdf_text(file_path)
+
+        # Reject order acknowledgments — already-placed orders, not new quotes
+        if _ACK_PATTERN.search(pdf_text):
+            print(f"  Skipping {path.name} — order acknowledgment, not a quote")
+            QUARANTINE_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(path), str(QUARANTINE_DIR / path.name))
+            return result
+
         # Step 1: Detect vendor and parse
         vendor_name, parsed = detect_and_parse(file_path)
         if vendor_name is None or parsed is None:
@@ -78,7 +94,6 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
         print(f"  ✓ {len(items)} line items extracted")
 
         # Quality check — validate parse result before creating PO
-        pdf_text     = _extract_pdf_text(file_path)
         _quote_total = float(
             getattr(parsed, 'net_total', None) or
             getattr(parsed, 'total', None)     or
