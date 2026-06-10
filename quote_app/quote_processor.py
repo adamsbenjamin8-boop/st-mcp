@@ -132,20 +132,11 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
             log_unknown_vendor(vendor_name=vendor_name, vendor_type="Unknown Vendor Name",
                                email_domain="", vendor_contact_email=email_sender)
 
-        # Step 3: Extract job reference — numeric only
-        # Only use job_name/cust_po as job ref if numeric — non-numeric values like
-        # "NANTUCKET" or "DENOMMEE PLUMBING" are project names, not job numbers.
-        # Fall through to email subject/body/pdf which vendors put the job number in.
-        _job_name = getattr(parsed, 'job_name', '') or ''
-        _cust_po  = getattr(parsed, 'cust_po', '')  or ''
-        _job_name_numeric = _job_name.strip() if _job_name.strip().isdigit() else ''
-        _cust_po_numeric  = _cust_po.strip()  if _cust_po.strip().isdigit()  else ''
-        job_ref  = (
-            _job_name_numeric                           or
-            _cust_po_numeric                            or
-            extract_job_reference(email_subject)        or
-            extract_job_reference(email_body)           or
-            extract_job_reference_strict(pdf_text)      or ''
+        # Step 3: Extract job reference — keyword-only from email subject/body
+        job_ref = (
+            extract_job_reference(email_subject) or
+            extract_job_reference(email_body) or
+            ''
         )
         po_ref = (getattr(parsed, 'cust_po', '') or
                   getattr(parsed, 'bid_no', '')  or

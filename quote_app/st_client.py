@@ -193,37 +193,7 @@ def find_vendor_id(vendor_name: str) -> Tuple[int, str, bool]:
 # Job reference extraction
 # ---------------------------------------------------------------------------
 def extract_job_reference(text: str) -> Optional[str]:
-    if not text:
-        return None
-    # Keyword-prefixed patterns first (most reliable)
-    for pattern in [
-        r'job\s*#?\s*(\d{5,})',
-        r'job\s*number\s*:?\s*(\d{5,})',
-        r'job\s*no\.?\s*:?\s*(\d{5,})',
-        r'work\s*order\s*[:#]?\s*(\d{5,})',
-        r'\bwo\s*[:#]?\s*(\d{5,})',
-        r'po\s*#?\s*([\d]{5,}(?:-\d+)?)',
-        r'#\s*(\d{6,})',
-    ]:
-        m = re.search(pattern, text.lower())
-        if m:
-            # Strip trailing -XXX sequence if present (PO display number → job number)
-            val = m.group(1).replace('-', '')
-            return val
-    # Bare 9-12 digit numbers last (catches job numbers and PO numbers without keywords)
-    m = re.search(r'\b(\d{9,12})\b', text)
-    if m:
-        return m.group(1)
-    return None
-
-
-def extract_job_reference_strict(text: str) -> Optional[str]:
-    """
-    Only match unambiguous keyword-prefixed job/work-order patterns.
-    Use this on raw PDF text which is noisy (phone numbers, catalog codes,
-    quote numbers, etc. all look like 9-12 digit numbers).
-    Does NOT fall back to bare-number matching.
-    """
+    """Extract job number from email subject or body. Keyword-prefixed patterns only."""
     if not text:
         return None
     for pattern in [
@@ -237,6 +207,11 @@ def extract_job_reference_strict(text: str) -> Optional[str]:
         if m:
             return m.group(1).replace('-', '')
     return None
+
+
+def extract_job_reference_strict(text: str) -> Optional[str]:
+    """Strict job reference extraction — keyword-prefixed only. Identical to extract_job_reference."""
+    return extract_job_reference(text)
 
 # ---------------------------------------------------------------------------
 # Job lookup
