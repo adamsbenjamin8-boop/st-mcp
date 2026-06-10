@@ -20,7 +20,7 @@ from st_client import (
     extract_job_reference, extract_job_reference_strict,
     DEFAULT_JOB_ID, DEFAULT_BUSINESS_UNIT_ID,
 )
-from teams_notifier import send_po_notification, send_ack_notification
+from teams_notifier import send_po_notification, send_teams_alert
 from smartsheet_logger import log_quote, log_missing_parts, log_unknown_vendor, log_parser_issue
 
 _LARGE_QUOTE_THRESHOLD = 500_000.0  # Teams warning added when quote total exceeds this
@@ -55,7 +55,18 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
             print(f"  Skipping {path.name} — order acknowledgment, not a quote")
             QUARANTINE_DIR.mkdir(parents=True, exist_ok=True)
             shutil.move(str(path), str(QUARANTINE_DIR / path.name))
-            send_ack_notification(filename=path.name, sender=email_sender)
+            try:
+                send_teams_alert(
+                    title="📋 Order Acknowledgment — Review Needed",
+                    message=(
+                        f"File **{path.name}** was received but is an order acknowledgment, "
+                        f"not a new quote. It has been saved to Quarantine.\n\n"
+                        f"Check the original email and verify this order in ServiceTitan."
+                    ),
+                    sender=email_sender or "unknown",
+                )
+            except Exception:
+                pass
             return result
 
         # Step 1: Detect vendor and parse

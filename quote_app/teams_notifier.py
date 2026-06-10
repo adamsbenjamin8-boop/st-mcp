@@ -93,6 +93,39 @@ def send_po_notification(
         return False
 
 
+def send_teams_alert(title: str, message: str, sender: str = "") -> bool:
+    """Post a plain-text alert card to the purchasing Teams channel."""
+    webhook_url = os.environ.get("TEAMS_PURCHASING_WEBHOOK", "")
+    if not webhook_url:
+        return False
+
+    facts = []
+    if sender:
+        facts.append({"name": "From", "value": sender})
+
+    payload = {
+        "@type":    "MessageCard",
+        "@context": "https://schema.org/extensions",
+        "summary":    title,
+        "themeColor": "FF8C00",
+        "sections": [{
+            "activityTitle": title,
+            "activityText":  message,
+            "facts":         facts,
+        }],
+    }
+
+    try:
+        r = httpx.post(webhook_url, json=payload, timeout=15)
+        if r.status_code == 200:
+            return True
+        print(f"  ❌ Teams alert returned {r.status_code}: {r.text[:100]}")
+        return False
+    except Exception as e:
+        print(f"  ❌ Teams alert error: {e}")
+        return False
+
+
 def send_ack_notification(filename: str, sender: str, vendor: str = "Unknown") -> bool:
     """Send a simple Teams alert when an order acknowledgment is quarantined."""
     webhook_url = os.environ.get("TEAMS_PURCHASING_WEBHOOK", "")
