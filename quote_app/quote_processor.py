@@ -188,8 +188,8 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
                                 getattr(item, 'mfr_code', '')       or ''),
             })
 
-        # Step 6: Add to existing PO or create new
-        existing_po = find_existing_po_on_job(job_id, vendor_id) if not using_default_job else None
+        # Step 6: Create new PO (always — add-to-existing returns 404 for PendingApproval POs)
+        existing_po = None
         po_id       = None
         po_number   = ""
         unmatched   = []

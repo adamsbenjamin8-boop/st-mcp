@@ -86,6 +86,8 @@ jobs:
               'quote_parsers/generic_csv.py',
               'quote_parsers/tunstall_corporation.py',
               'quote_parsers/plumbers_supply_co.py',
+              'quote_parsers/buckley_associates.py',
+              'quote_parsers/trane_u_s__inc.py',
           ]
           lines = []
           for path in files:
@@ -123,6 +125,8 @@ jobs:
             quote_parsers/generic_csv.py
             quote_parsers/tunstall_corporation.py
             quote_parsers/plumbers_supply_co.py
+            quote_parsers/buckley_associates.py
+            quote_parsers/trane_u_s__inc.py
             quote_app/email_monitor.py
             quote_app/claude_parser.py
             quote_app/approved_senders.py
