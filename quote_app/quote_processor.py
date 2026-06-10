@@ -20,7 +20,7 @@ from st_client import (
     extract_job_reference, extract_job_reference_strict,
     DEFAULT_JOB_ID, DEFAULT_BUSINESS_UNIT_ID,
 )
-from teams_notifier import send_po_notification
+from teams_notifier import send_po_notification, send_ack_notification
 from smartsheet_logger import log_quote, log_missing_parts, log_unknown_vendor, log_parser_issue
 
 _LARGE_QUOTE_THRESHOLD = 500_000.0  # Teams warning added when quote total exceeds this
@@ -55,6 +55,7 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
             print(f"  Skipping {path.name} — order acknowledgment, not a quote")
             QUARANTINE_DIR.mkdir(parents=True, exist_ok=True)
             shutil.move(str(path), str(QUARANTINE_DIR / path.name))
+            send_ack_notification(filename=path.name, sender=email_sender)
             return result
 
         # Step 1: Detect vendor and parse

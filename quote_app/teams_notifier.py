@@ -91,3 +91,37 @@ def send_po_notification(
     except Exception as e:
         print(f"  ❌ Teams notification error: {e}")
         return False
+
+
+def send_ack_notification(filename: str, sender: str, vendor: str = "Unknown") -> bool:
+    """Send a simple Teams alert when an order acknowledgment is quarantined."""
+    webhook_url = os.environ.get("TEAMS_PURCHASING_WEBHOOK", "")
+    if not webhook_url:
+        return False
+
+    payload = {
+        "@type":    "MessageCard",
+        "@context": "https://schema.org/extensions",
+        "summary":    f"Order Acknowledgment Received — {filename}",
+        "themeColor": "FF8C00",
+        "sections": [{
+            "activityTitle":    "📋 Order Acknowledgment Received — Manual Review Needed",
+            "activitySubtitle": "This is a confirmation of an existing order, not a new quote. No PO was created.",
+            "facts": [
+                {"name": "File",   "value": filename},
+                {"name": "Vendor", "value": vendor},
+                {"name": "From",   "value": sender or "Unknown"},
+                {"name": "Action", "value": "File saved to Quarantine — check the original email and verify the order in ServiceTitan"},
+            ],
+        }],
+    }
+
+    try:
+        r = httpx.post(webhook_url, json=payload, timeout=15)
+        if r.status_code == 200:
+            return True
+        print(f"  ❌ Teams ack notification returned {r.status_code}: {r.text[:100]}")
+        return False
+    except Exception as e:
+        print(f"  ❌ Teams ack notification error: {e}")
+        return False
