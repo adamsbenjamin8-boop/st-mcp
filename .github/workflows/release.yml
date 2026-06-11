@@ -101,50 +101,48 @@ jobs:
 
       - name: Create GitHub Release (scripts-only)
         if: startsWith(github.ref_name, 'scripts-')
-        uses: softprops/action-gh-release@v2
-        with:
-          name: "ST MCP ${{ github.ref_name }}"
-          body: "Automated release from tag ${{ github.ref_name }}"
-          files: |
-            servicetitan_writer.py
-            st_cache_sync.py
-            desktop_app/version.py
-            quote_app/main.py
-            quote_app/config.py
-            quote_app/vendor_router.py
-            quote_app/st_client.py
-            quote_app/teams_notifier.py
-            quote_app/smartsheet_logger.py
-            quote_app/quote_processor.py
-            quote_app/folder_watcher.py
-            quote_parsers/__init__.py
-            quote_parsers/ferguson.py
-            quote_parsers/johnstone.py
-            quote_parsers/fwwebb.py
-            quote_parsers/generic_csv.py
-            quote_parsers/tunstall_corporation.py
-            quote_parsers/plumbers_supply_co.py
-            quote_parsers/trane_u_s__inc.py
-            quote_app/email_monitor.py
-            quote_app/claude_parser.py
-            quote_app/approved_senders.py
-            quote_app/parser_quality.py
-            quote_app/parser_failures.py
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            --title "ST MCP ${{ github.ref_name }}" `
+            --notes "Automated release from tag ${{ github.ref_name }}" `
+            servicetitan_writer.py `
+            st_cache_sync.py `
+            desktop_app/version.py `
+            quote_app/main.py `
+            quote_app/config.py `
+            quote_app/vendor_router.py `
+            quote_app/st_client.py `
+            quote_app/teams_notifier.py `
+            quote_app/smartsheet_logger.py `
+            quote_app/quote_processor.py `
+            quote_app/folder_watcher.py `
+            quote_app/email_monitor.py `
+            quote_app/claude_parser.py `
+            quote_app/approved_senders.py `
+            quote_app/parser_quality.py `
+            quote_app/parser_failures.py `
+            quote_parsers/__init__.py `
+            quote_parsers/ferguson.py `
+            quote_parsers/johnstone.py `
+            quote_parsers/fwwebb.py `
+            quote_parsers/generic_csv.py `
+            quote_parsers/tunstall_corporation.py `
+            quote_parsers/plumbers_supply_co.py `
+            quote_parsers/trane_u_s__inc.py `
             checksums.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release (full app)
         if: "!startsWith(github.ref_name, 'scripts-')"
-        uses: softprops/action-gh-release@v2
-        with:
-          name: "ST MCP ${{ github.ref_name }}"
-          body: "Automated release from tag ${{ github.ref_name }}"
-          files: |
-            servicetitan_writer.py
-            st_cache_sync.py
-            desktop_app/version.py
-            desktop_app/build/Output/ST_MCP_Setup.exe
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            --title "ST MCP ${{ github.ref_name }}" `
+            --notes "Automated release from tag ${{ github.ref_name }}" `
+            servicetitan_writer.py `
+            st_cache_sync.py `
+            desktop_app/version.py `
+            desktop_app/build/Output/ST_MCP_Setup.exe `
             checksums.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
