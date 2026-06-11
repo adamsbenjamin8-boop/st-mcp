@@ -232,11 +232,18 @@ def find_job_id(job_ref: str) -> Optional[dict]:
             items = data.get("data", [])
             if items:
                 j = items[0]
-                c = j.get("customer") or {}
+                customer_name = ""
+                customer_id = j.get("customerId") or (j.get("customer") or {}).get("id")
+                if customer_id:
+                    try:
+                        cust = _get(("crm", f"customers/{customer_id}"), {})
+                        customer_name = cust.get("name", "")
+                    except Exception:
+                        pass
                 return {
                     "id":             j["id"],
-                    "jobNumber":      j.get("number", ""),
-                    "customerName":   c.get("name", "") if isinstance(c, dict) else "",
+                    "jobNumber":      j.get("jobNumber") or j.get("number", ""),
+                    "customerName":   customer_name,
                     "businessUnitId": j.get("businessUnitId"),
                 }
     except Exception:
