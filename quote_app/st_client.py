@@ -192,8 +192,9 @@ def find_vendor_id(vendor_name: str) -> Tuple[int, str, bool]:
 # ---------------------------------------------------------------------------
 # Job reference extraction
 # ---------------------------------------------------------------------------
-def extract_job_reference(text: str) -> Optional[str]:
-    """Extract job number from email subject or body. Keyword-prefixed patterns only."""
+def extract_job_reference(text: str, subject_mode: bool = False) -> Optional[str]:
+    """Extract job number from email subject or body. Keyword-prefixed patterns work everywhere;
+    subject_mode also matches a standalone 7–9 digit number (job numbers are 9 digits)."""
     if not text:
         return None
     for pattern in [
@@ -206,12 +207,16 @@ def extract_job_reference(text: str) -> Optional[str]:
         m = re.search(pattern, text, re.IGNORECASE)
         if m:
             return m.group(1).replace('-', '')
+    if subject_mode:
+        m = re.search(r'\b(\d{7,9})\b', text.strip())
+        if m:
+            return m.group(1)
     return None
 
 
-def extract_job_reference_strict(text: str) -> Optional[str]:
-    """Strict job reference extraction — keyword-prefixed only. Identical to extract_job_reference."""
-    return extract_job_reference(text)
+def extract_job_reference_strict(text: str, subject_mode: bool = False) -> Optional[str]:
+    """Strict job reference extraction — keyword-prefixed only. Passes subject_mode through."""
+    return extract_job_reference(text, subject_mode=subject_mode)
 
 # ---------------------------------------------------------------------------
 # Job lookup

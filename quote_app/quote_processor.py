@@ -168,9 +168,9 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
             log_unknown_vendor(vendor_name=vendor_name, vendor_type="Unknown Vendor Name",
                                email_domain="", vendor_contact_email=email_sender)
 
-        # Step 3: Extract job reference — keyword-only from email subject/body
+        # Step 3: Extract job reference — subject allows bare 9-digit match; body is keyword-only
         job_ref = (
-            extract_job_reference(email_subject) or
+            extract_job_reference(email_subject, subject_mode=True) or
             extract_job_reference(email_body) or
             ''
         )
