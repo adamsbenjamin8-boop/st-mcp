@@ -1,6 +1,6 @@
 """
-Teams Notifier — sends PO notifications via incoming webhook.
-No SMTP. Uses HTTP POST directly to Teams channel.
+Teams Notifier — sends notifications via Power Automate Workflows webhook.
+Uses Adaptive Card format (required by Workflows webhooks; MessageCard is legacy).
 """
 import os
 import httpx
@@ -19,6 +19,41 @@ def _load_env():
 _load_env()
 
 
+def _post(payload: dict) -> bool:
+    webhook_url = os.environ.get("TEAMS_PURCHASING_WEBHOOK", "")
+    if not webhook_url:
+        print("  ⚠ TEAMS_PURCHASING_WEBHOOK not configured — skipping")
+        return False
+    try:
+        r = httpx.post(webhook_url, json=payload, timeout=15)
+        if r.status_code == 202 or r.status_code == 200:
+            return True
+        print(f"  ❌ Teams webhook returned {r.status_code}: {r.text[:120]}")
+        return False
+    except Exception as e:
+        print(f"  ❌ Teams webhook error: {e}")
+        return False
+
+
+def _adaptive_card(body: list, actions: list | None = None) -> dict:
+    """Wrap Adaptive Card body into the Workflows webhook envelope."""
+    card: dict = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type":    "AdaptiveCard",
+        "version": "1.2",
+        "body":    body,
+    }
+    if actions:
+        card["actions"] = actions
+    return {
+        "type": "message",
+        "attachments": [{
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "content":     card,
+        }],
+    }
+
+
 def send_po_notification(
     vendor: str,
     vendor_matched: bool,
@@ -31,130 +66,93 @@ def send_po_notification(
     notes: str = "",
     unmatched_count: int = 0,
 ) -> bool:
-    webhook_url = os.environ.get("TEAMS_PURCHASING_WEBHOOK", "")
-    if not webhook_url:
-        print("  ⚠ TEAMS_PURCHASING_WEBHOOK not configured — skipping")
-        return False
-
     po_url = f"https://go.servicetitan.com/#/new/inventory/purchase-orders/details/{po_id}"
     today  = datetime.now().strftime("%m/%d/%Y %I:%M %p")
 
-    # Vendor line with confidence flag
-    if vendor_matched:
-        vendor_line = f"✅ {vendor_st_name}"
-        theme_color = "0076D7"
-    else:
-        vendor_line = f"⚠️ {vendor_st_name} — verify before approving"
-        theme_color = "FF8C00"
+    vendor_value  = f"✅ {vendor_st_name}" if vendor_matched else f"⚠️ {vendor_st_name} — verify before approving"
+    header_color  = "Good" if vendor_matched else "Warning"
 
     facts = [
-        {"name": "PO Number", "value": po_number},
-        {"name": "Vendor",    "value": vendor_line},
-        {"name": "Total",     "value": f"${total:,.2f}"},
-        {"name": "Items",     "value": str(item_count)},
-        {"name": "Job",       "value": job_name},
-        {"name": "Time",      "value": today},
+        {"title": "PO Number", "value": po_number},
+        {"title": "Vendor",    "value": vendor_value},
+        {"title": "Total",     "value": f"${total:,.2f}"},
+        {"title": "Items",     "value": str(item_count)},
+        {"title": "Job",       "value": job_name},
+        {"title": "Time",      "value": today},
     ]
-
     if unmatched_count:
         facts.append({
-            "name":  "⚠️ Pricebook",
-            "value": f"{unmatched_count} items used HMIL fallback — check Missing Parts Queue"
+            "title": "⚠️ Pricebook",
+            "value": f"{unmatched_count} items used HMIL fallback — check Missing Parts Queue",
         })
-
     if notes:
-        facts.append({"name": "Notes", "value": notes})
+        facts.append({"title": "Notes", "value": notes})
 
-    payload = {
-        "@type":    "MessageCard",
-        "@context": "https://schema.org/extensions",
-        "summary":      f"New PO: {vendor_st_name}",
-        "themeColor":   theme_color,
-        "sections": [{
-            "activityTitle":    f"📦 New Purchase Order — {vendor_st_name}",
-            "activitySubtitle": f"PO #{po_number} | ${total:,.2f}",
-            "facts":            facts,
-        }],
-        "potentialAction": [{
-            "@type": "OpenUri",
-            "name":  "Open PO in ServiceTitan",
-            "targets": [{"os": "default", "uri": po_url}]
-        }]
-    }
+    body = [
+        {
+            "type":   "TextBlock",
+            "text":   f"📦 New Purchase Order — {vendor_st_name}",
+            "weight": "Bolder",
+            "size":   "Medium",
+            "color":  header_color,
+            "wrap":   True,
+        },
+        {
+            "type":     "TextBlock",
+            "text":     f"PO #{po_number} | ${total:,.2f}",
+            "isSubtle": True,
+            "spacing":  "None",
+        },
+        {
+            "type":  "FactSet",
+            "facts": facts,
+        },
+    ]
 
-    try:
-        r = httpx.post(webhook_url, json=payload, timeout=15)
-        if r.status_code == 200:
-            return True
-        print(f"  ❌ Teams webhook returned {r.status_code}: {r.text[:100]}")
-        return False
-    except Exception as e:
-        print(f"  ❌ Teams notification error: {e}")
-        return False
+    actions = [{
+        "type":  "Action.OpenUrl",
+        "title": "Open PO in ServiceTitan",
+        "url":   po_url,
+    }]
+
+    return _post(_adaptive_card(body, actions))
 
 
 def send_teams_alert(title: str, message: str, sender: str = "") -> bool:
     """Post a plain-text alert card to the purchasing Teams channel."""
-    webhook_url = os.environ.get("TEAMS_PURCHASING_WEBHOOK", "")
-    if not webhook_url:
-        return False
-
     facts = []
     if sender:
-        facts.append({"name": "From", "value": sender})
+        facts.append({"title": "From", "value": sender})
 
-    payload = {
-        "@type":    "MessageCard",
-        "@context": "https://schema.org/extensions",
-        "summary":    title,
-        "themeColor": "FF8C00",
-        "sections": [{
-            "activityTitle": title,
-            "activityText":  message,
-            "facts":         facts,
-        }],
-    }
+    body: list = [
+        {
+            "type":   "TextBlock",
+            "text":   title,
+            "weight": "Bolder",
+            "size":   "Medium",
+            "color":  "Warning",
+            "wrap":   True,
+        },
+        {
+            "type": "TextBlock",
+            "text": message,
+            "wrap": True,
+        },
+    ]
+    if facts:
+        body.append({"type": "FactSet", "facts": facts})
 
-    try:
-        r = httpx.post(webhook_url, json=payload, timeout=15)
-        if r.status_code == 200:
-            return True
-        print(f"  ❌ Teams alert returned {r.status_code}: {r.text[:100]}")
-        return False
-    except Exception as e:
-        print(f"  ❌ Teams alert error: {e}")
-        return False
+    return _post(_adaptive_card(body))
 
 
 def send_ack_notification(filename: str, sender: str, vendor: str = "Unknown") -> bool:
-    """Send a simple Teams alert when an order acknowledgment is quarantined."""
-    webhook_url = os.environ.get("TEAMS_PURCHASING_WEBHOOK", "")
-    if not webhook_url:
-        return False
-
-    payload = {
-        "@type":    "MessageCard",
-        "@context": "https://schema.org/extensions",
-        "summary":    f"Order Acknowledgment Received — {filename}",
-        "themeColor": "FF8C00",
-        "sections": [{
-            "activityTitle":    "📋 Order Acknowledgment Received — Manual Review Needed",
-            "activitySubtitle": "This is a confirmation of an existing order, not a new quote. No PO was created.",
-            "facts": [
-                {"name": "File",   "value": filename},
-                {"name": "Vendor", "value": vendor},
-                {"name": "From",   "value": sender or "Unknown"},
-                {"name": "Action", "value": "File saved to Quarantine — check the original email and verify the order in ServiceTitan"},
-            ],
-        }],
-    }
-
-    try:
-        r = httpx.post(webhook_url, json=payload, timeout=15)
-        if r.status_code == 200:
-            return True
-        print(f"  ❌ Teams ack notification returned {r.status_code}: {r.text[:100]}")
-        return False
-    except Exception as e:
-        print(f"  ❌ Teams ack notification error: {e}")
-        return False
+    """Send a Teams alert when an order acknowledgment is quarantined."""
+    return send_teams_alert(
+        title="📋 Order Acknowledgment Received — Manual Review Needed",
+        message=(
+            f"File **{filename}** is an order acknowledgment, not a new quote. "
+            f"No PO was created. It has been saved to Quarantine.\n\n"
+            f"Check the original email and verify this order in ServiceTitan."
+        ),
+        sender=sender or vendor,
+    )
