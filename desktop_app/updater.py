@@ -71,7 +71,7 @@ def check_for_updates() -> UpdateResult:
         return UpdateResult(False, message=f"Network error: {e}")
 
     tag: str = data.get("tag_name", "")
-    version_str = tag.lstrip("v").split("-")[-1]          # "app-v1.2.3" → "1.2.3"
+    version_str = tag.split("-")[-1].lstrip("v")           # "app-v1.2.3" → "1.2.3"
 
     try:
         remote_ver = Version(version_str)
