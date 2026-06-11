@@ -251,11 +251,44 @@ def find_job_id(job_ref: str) -> Optional[dict]:
                             customer_name = cust.get("name", "")
                     except Exception:
                         pass
+
+                location_id = j.get("locationId")
+                ship_to_address = ""
+                if location_id:
+                    try:
+                        conn = sqlite3.connect(DB_PATH)
+                        row = conn.execute(
+                            "SELECT address, city, state, zip FROM locations WHERE id = ?",
+                            (location_id,)
+                        ).fetchone()
+                        conn.close()
+                        if row:
+                            parts = [p for p in [row[0], row[1], row[2], row[3]] if p]
+                            ship_to_address = ", ".join(parts)
+                    except Exception:
+                        pass
+
+                customer_address = ""
+                if customer_id:
+                    try:
+                        conn = sqlite3.connect(DB_PATH)
+                        row = conn.execute("SELECT raw FROM customers WHERE id = ?", (customer_id,)).fetchone()
+                        conn.close()
+                        if row and row[0]:
+                            raw = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                            addr = raw.get("address") or {}
+                            parts = [p for p in [addr.get("street", ""), addr.get("city", ""), addr.get("state", ""), addr.get("zip", "")] if p]
+                            customer_address = ", ".join(parts)
+                    except Exception:
+                        pass
+
                 return {
-                    "id":             j["id"],
-                    "jobNumber":      j.get("jobNumber") or j.get("number", ""),
-                    "customerName":   customer_name,
-                    "businessUnitId": j.get("businessUnitId"),
+                    "id":              j["id"],
+                    "jobNumber":       j.get("jobNumber") or j.get("number", ""),
+                    "customerName":    customer_name,
+                    "customerAddress": customer_address,
+                    "shipToAddress":   ship_to_address,
+                    "businessUnitId":  j.get("businessUnitId"),
                 }
     except Exception:
         pass

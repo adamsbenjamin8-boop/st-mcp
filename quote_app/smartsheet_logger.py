@@ -41,6 +41,8 @@ QLOG_COL_JOB_NUMBER     = 1671217164881796   # new
 QLOG_COL_CUSTOMER_NAME  = 6174816792252292   # new
 QLOG_COL_ST_LINK        = 3923016978567044   # new
 QLOG_COL_STATUS         = 5443014721048452   # new
+QLOG_COL_SHIP_TO        = 569204280692612    # new
+QLOG_COL_CUSTOMER_ADDR  = 4208915259887492   # new
 
 # ---------------------------------------------------------------------------
 # Missing Parts Queue column IDs (verified from sheet)
@@ -129,6 +131,8 @@ def log_quote(
     customer_name=None,
     pdf_path=None,
     status: str = "Processed",
+    ship_to_address: str = "",
+    customer_address: str = "",
 ) -> bool:
     cells = [
         {"columnId": QLOG_COL_VENDOR_NAME,   "value": vendor_name},
@@ -152,6 +156,10 @@ def log_quote(
             "value":     "View PO",
             "hyperlink": {"url": f"https://go.servicetitan.com/#/new/inventory/purchase-orders/details/{po_id}"},
         })
+    if ship_to_address:
+        cells.append({"columnId": QLOG_COL_SHIP_TO,       "value": ship_to_address})
+    if customer_address:
+        cells.append({"columnId": QLOG_COL_CUSTOMER_ADDR, "value": customer_address})
     row_id = _add_rows(QUOTE_PARSER_LOG_SHEET, [{"cells": cells, "toBottom": True}])
     if row_id is not None and pdf_path is not None:
         _attach_pdf_to_row(row_id, pdf_path)

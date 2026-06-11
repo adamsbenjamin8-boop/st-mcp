@@ -296,6 +296,8 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
             customer_name=job.get("customerName"),
             pdf_path=path,
             status="Processed",
+            ship_to_address=job.get("shipToAddress", ""),
+            customer_address=job.get("customerAddress", ""),
         )
 
         # Step 10: Move to Processed
