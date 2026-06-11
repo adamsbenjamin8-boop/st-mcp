@@ -283,8 +283,8 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
             parser_added=(parsed_by_label == "Local Parser"),
             po_number=po_number,
             po_id=po_id,
-            job_number=job.get("jobNumber") if not using_default_job else None,
-            customer_name=job.get("customerName") if not using_default_job else None,
+            job_number=job.get("jobNumber"),
+            customer_name=job.get("customerName"),
             pdf_path=path,
         )
 
