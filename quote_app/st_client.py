@@ -268,6 +268,7 @@ def find_job_id(job_ref: str) -> Optional[dict]:
                     except Exception:
                         pass
 
+                # Customer address — cache first, then live API
                 customer_address = ""
                 if customer_id:
                     try:
@@ -277,6 +278,11 @@ def find_job_id(job_ref: str) -> Optional[dict]:
                         if row and row[0]:
                             raw = json.loads(row[0]) if isinstance(row[0], str) else row[0]
                             addr = raw.get("address") or {}
+                            parts = [p for p in [addr.get("street", ""), addr.get("city", ""), addr.get("state", ""), addr.get("zip", "")] if p]
+                            customer_address = ", ".join(parts)
+                        if not customer_address:
+                            cust = _get(("crm", f"customers/{customer_id}"), {})
+                            addr = cust.get("address") or {}
                             parts = [p for p in [addr.get("street", ""), addr.get("city", ""), addr.get("state", ""), addr.get("zip", "")] if p]
                             customer_address = ", ".join(parts)
                     except Exception:
