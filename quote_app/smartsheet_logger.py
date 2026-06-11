@@ -40,6 +40,7 @@ QLOG_COL_PO_NUMBER      = 6331607794618244   # already existed
 QLOG_COL_JOB_NUMBER     = 1671217164881796   # new
 QLOG_COL_CUSTOMER_NAME  = 6174816792252292   # new
 QLOG_COL_ST_LINK        = 3923016978567044   # new
+QLOG_COL_STATUS         = 5443014721048452   # new
 
 # ---------------------------------------------------------------------------
 # Missing Parts Queue column IDs (verified from sheet)
@@ -127,6 +128,7 @@ def log_quote(
     job_number=None,
     customer_name=None,
     pdf_path=None,
+    status: str = "Processed",
 ) -> bool:
     cells = [
         {"columnId": QLOG_COL_VENDOR_NAME,   "value": vendor_name},
@@ -136,6 +138,7 @@ def log_quote(
         {"columnId": QLOG_COL_PARSER_ADDED,   "value": parser_added},
         {"columnId": QLOG_COL_ITEMS,          "value": str(item_count)},
         {"columnId": QLOG_COL_NOTES,          "value": notes},
+        {"columnId": QLOG_COL_STATUS,         "value": status},
     ]
     if po_number is not None:
         cells.append({"columnId": QLOG_COL_PO_NUMBER,     "value": po_number})
@@ -169,6 +172,7 @@ def log_parser_issue(
     job_number=None,
     customer_name=None,
     pdf_path=None,
+    status: str = "Processed",
 ) -> bool:
     """Write a quality-failure row to the Quote Parser Log sheet."""
     issue_str = "; ".join(issues) if issues else "unknown"
@@ -186,6 +190,7 @@ def log_parser_issue(
         {"columnId": QLOG_COL_PARSER_ADDED,   "value": False},
         {"columnId": QLOG_COL_ITEMS,          "value": str(items_extracted)},
         {"columnId": QLOG_COL_NOTES,          "value": notes},
+        {"columnId": QLOG_COL_STATUS,         "value": status},
     ]
     if po_number is not None:
         cells.append({"columnId": QLOG_COL_PO_NUMBER,     "value": po_number})

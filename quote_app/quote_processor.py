@@ -54,6 +54,15 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
         if _ACK_PATTERN.search(pdf_text):
             print(f"  Skipping {path.name} — order acknowledgment, not a quote")
             QUARANTINE_DIR.mkdir(parents=True, exist_ok=True)
+            log_quote(
+                vendor_name="Unknown",
+                filename=path.name,
+                parsed_by="N/A",
+                item_count=0,
+                notes="Order acknowledgment — quarantined",
+                status="Quarantined",
+                pdf_path=path,
+            )
             shutil.move(str(path), str(QUARANTINE_DIR / path.name))
             try:
                 send_teams_alert(
@@ -87,7 +96,7 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
                 log_quote(vendor_name="Unknown", filename=path.name, parsed_by="Claude AI",
                           item_count=0, parser_added=False,
                           notes="Claude API failed — manual review needed",
-                          pdf_path=path)
+                          pdf_path=path, status="Error")
                 result["error"] = "unknown_vendor"
                 return result
         else:
@@ -286,6 +295,7 @@ def process_quote_file(file_path: str, workflow: str = "po") -> dict:
             job_number=job.get("jobNumber"),
             customer_name=job.get("customerName"),
             pdf_path=path,
+            status="Processed",
         )
 
         # Step 10: Move to Processed
