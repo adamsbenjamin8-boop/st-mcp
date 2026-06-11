@@ -236,8 +236,14 @@ def find_job_id(job_ref: str) -> Optional[dict]:
                 customer_id = j.get("customerId") or (j.get("customer") or {}).get("id")
                 if customer_id:
                     try:
-                        cust = _get(("crm", f"customers/{customer_id}"), {})
-                        customer_name = cust.get("name", "")
+                        conn = sqlite3.connect(DB_PATH)
+                        row = conn.execute("SELECT name FROM customers WHERE id = ?", (customer_id,)).fetchone()
+                        conn.close()
+                        if row:
+                            customer_name = row[0] or ""
+                        else:
+                            cust = _get(("crm", f"customers/{customer_id}"), {})
+                            customer_name = cust.get("name", "")
                     except Exception:
                         pass
                 return {
