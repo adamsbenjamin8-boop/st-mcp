@@ -64,6 +64,23 @@ def scan_and_process(folder: Path, processor_fn: Callable, one_shot: bool = Fals
                     print(f"  ✗ Error processing {file.name}: {e}")
                     print(error_detail)
 
+                    # Log to Smartsheet before moving so the file is still at its
+                    # original path when the attachment upload runs.
+                    try:
+                        from smartsheet_logger import log_quote
+                        log_quote(
+                            vendor_name="Unknown",
+                            filename=file.name,
+                            parsed_by="N/A",
+                            item_count=0,
+                            parser_added=False,
+                            notes=f"Watcher exception: {e}",
+                            pdf_path=file,
+                            status="Error",
+                        )
+                    except Exception:
+                        pass  # don't let logging failure block the file move
+
                     # Move to Failed/ so operators can see what went wrong and
                     # files don't pile up invisibly in the inbox.
                     try:
