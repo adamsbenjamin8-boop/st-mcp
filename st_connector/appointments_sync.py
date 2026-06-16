@@ -61,13 +61,27 @@ def _is_stale(appt: dict) -> bool:
         return False
 
 
-def sync_once() -> None:
-    log.info("[appointments] sync start")
+def sync_once(*, backfill: bool = False) -> None:
+    log.info("[appointments] sync start%s", " (backfill)" if backfill else "")
     try:
         sheet = ss.get_sheet(APPT_SHEET_ID)
         existing = ss.get_cell_values(sheet, _KEY, list(_COL.values()))
 
-        appts = st_api.fetch_appointments()
+        modified_after = None
+        progress_cb = None
+        if not backfill:
+            interval = SYNC_INTERVALS["appointments"]
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=interval * 2)
+            modified_after = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            def progress_cb(fetched, total):
+                log.info("[appointments] Backfill: %d/%s records fetched",
+                         fetched, total if total is not None else "?")
+
+        appts = st_api.fetch_appointments(
+            modified_after=modified_after,
+            progress_cb=progress_cb,
+        )
         log.info("[appointments] fetched %d from ST", len(appts))
 
         to_add    = []

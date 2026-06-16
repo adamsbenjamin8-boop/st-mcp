@@ -6,6 +6,7 @@ Removes rows when Invoice Status = "Exported".
 
 import logging
 import time
+from datetime import datetime, timezone, timedelta
 
 from . import st_api, smartsheet_client as ss
 from .config import INVOICE_SHEET_ID, INVOICE_COLS, SYNC_INTERVALS
@@ -51,13 +52,27 @@ def _is_empty(inv: dict) -> bool:
         return False
 
 
-def sync_once() -> None:
-    log.info("[invoices] sync start")
+def sync_once(*, backfill: bool = False) -> None:
+    log.info("[invoices] sync start%s", " (backfill)" if backfill else "")
     try:
         sheet    = ss.get_sheet(INVOICE_SHEET_ID)
         existing = ss.get_cell_values(sheet, _KEY, list(_COL.values()))
 
-        invoices = st_api.fetch_invoices()
+        modified_after = None
+        progress_cb = None
+        if not backfill:
+            interval = SYNC_INTERVALS["invoices"]
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=interval * 2)
+            modified_after = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            def progress_cb(fetched, total):
+                log.info("[invoices] Backfill: %d/%s records fetched",
+                         fetched, total if total is not None else "?")
+
+        invoices = st_api.fetch_invoices(
+            modified_after=modified_after,
+            progress_cb=progress_cb,
+        )
         log.info("[invoices] fetched %d from ST", len(invoices))
 
         to_add    = []

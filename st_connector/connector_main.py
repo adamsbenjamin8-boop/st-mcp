@@ -4,17 +4,23 @@ st_connector — entry point.
 Starts one daemon thread per enabled sync module.
 Each thread runs its own loop independently so one failure can't block others.
 
+On first run (or when .sync_state.json is missing / backfill_complete=False),
+performs a full historical backfill before starting normal interval threads.
+Delete .sync_state.json to force a fresh backfill on next start.
+
 Usage:
     python -m st_connector.connector_main
     # or from repo root:
     python st_connector/connector_main.py
 """
 
+import json
 import logging
 import signal
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,8 +30,8 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-from .config import ENABLED_MODULES, SYNC_INTERVALS   # noqa: E402
-from . import capabilities                             # noqa: E402
+from .config import ENABLED_MODULES, SYNC_INTERVALS, SYNC_STATE_FILE   # noqa: E402
+from . import capabilities                                               # noqa: E402
 
 _MODULE_MAP = {
     "appointments": "st_connector.appointments_sync",
@@ -40,24 +46,28 @@ _shutdown = threading.Event()
 
 
 # ---------------------------------------------------------------------------
+# Sync state file
+# ---------------------------------------------------------------------------
+
+def _load_state() -> dict:
+    try:
+        return json.loads(SYNC_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"backfill_complete": False, "last_sync": None}
+
+
+def _save_state(state: dict) -> None:
+    try:
+        SYNC_STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    except Exception as exc:
+        log.warning("Could not write sync state file: %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # Startup capability report
 # ---------------------------------------------------------------------------
 
 def _print_capability_table(caps: dict) -> None:
-    """
-    Print a clear table of which modules are active and whether
-    ST write-back is currently permitted by the Developer App.
-
-    Example output:
-      Module          Config      SS←ST Read   ST←SS Write
-      ─────────────────────────────────────────────────────
-      appointments    ENABLED     GRANTED      GRANTED
-      jobs            ENABLED     GRANTED      read-only
-      invoices        DISABLED    —            —
-      tasks           ENABLED     GRANTED      read-only
-      estimates       ENABLED     GRANTED      GRANTED
-      pos             ENABLED     GRANTED      GRANTED
-    """
     COL = (16, 12, 13, 13)
     hdr = (
         f"{'Module':<{COL[0]}}"
@@ -76,8 +86,8 @@ def _print_capability_table(caps: dict) -> None:
             )
             continue
         mc = caps.get(module, {})
-        read_s  = "GRANTED"   if mc.get("read")  else "NO SCOPE"
-        write_s = "GRANTED"   if mc.get("write") else "read-only"
+        read_s  = "GRANTED"  if mc.get("read")  else "NO SCOPE"
+        write_s = "GRANTED"  if mc.get("write") else "read-only"
         log.info(
             f"{module:<{COL[0]}}{'ENABLED':<{COL[1]}}{read_s:<{COL[2]}}{write_s:<{COL[3]}}"
         )
@@ -89,7 +99,32 @@ def _print_capability_table(caps: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Thread runner
+# Backfill
+# ---------------------------------------------------------------------------
+
+def _run_backfill(loaded: list) -> None:
+    """Run sync_once(backfill=True) for each module sequentially."""
+    log.info("=" * 60)
+    log.info("BACKFILL MODE — fetching all historical records from ST")
+    log.info("This may take several minutes on first run.")
+    log.info("=" * 60)
+
+    for name, mod in loaded:
+        log.info("─" * 40)
+        log.info("Backfill starting: %s", name)
+        try:
+            mod.sync_once(backfill=True)
+            log.info("Backfill complete: %s", name)
+        except Exception as exc:
+            log.error("Backfill failed for %s: %s", name, exc, exc_info=True)
+            log.warning("%s will be caught up by normal sync threads.", name)
+        # Brief pause between modules so we don't hammer both APIs
+        if not _shutdown.is_set():
+            time.sleep(5)
+
+
+# ---------------------------------------------------------------------------
+# Thread runner (normal mode)
 # ---------------------------------------------------------------------------
 
 def _safe_loop(name: str, module) -> None:
@@ -100,7 +135,6 @@ def _safe_loop(name: str, module) -> None:
             module.sync_once()
         except Exception as exc:
             log.error("[%s] unhandled exception in sync_once: %s", name, exc, exc_info=True)
-        # Invalidate capability cache before next cycle so Dev App changes are picked up
         capabilities.invalidate()
         _shutdown.wait(interval)
 
@@ -119,38 +153,55 @@ def main() -> None:
     log.info("st_connector starting")
     log.info("=" * 60)
 
-    # Probe ST Developer App capability grants before launching threads
     log.info("Checking ST Developer App capability grants…")
     caps = capabilities.get_all()
     _print_capability_table(caps)
 
-    threads: list[threading.Thread] = []
-
+    # Load all enabled modules that have read scope
+    loaded: list[tuple[str, object]] = []
     for name, enabled in ENABLED_MODULES.items():
         if not enabled:
             continue
-
         if not caps.get(name, {}).get("read"):
             log.warning(
                 "[%s] read scope '%s' not granted — module skipped",
                 name, capabilities.READ_SCOPES.get(name, "?"),
             )
             continue
-
         dotted = _MODULE_MAP.get(name)
         if not dotted:
             log.warning("[%s] no module mapping — skipping", name)
             continue
-
         try:
             mod = _load_module(dotted)
+            loaded.append((name, mod))
         except Exception as exc:
             log.error("[%s] import failed: %s", name, exc)
-            continue
 
+    if not loaded:
+        log.error("No modules could be loaded. Check config and ST scope grants.")
+        sys.exit(1)
+
+    # Backfill if this is the first run (state file missing or incomplete)
+    state = _load_state()
+    if not state.get("backfill_complete", False):
+        _run_backfill(loaded)
+        _save_state({
+            "backfill_complete": True,
+            "last_sync": datetime.now(timezone.utc).isoformat(),
+        })
+        log.info("=" * 60)
+        log.info("Backfill finished — starting normal sync threads.")
+        log.info("=" * 60)
+    else:
+        last = state.get("last_sync", "unknown")
+        log.info("Backfill already complete (last sync: %s). Starting normal threads.", last)
+
+    # Start one daemon thread per module with staggered startup
+    threads: list[threading.Thread] = []
+    for name, mod in loaded:
         interval = SYNC_INTERVALS.get(name, 900)
         log.info("[%s] starting thread (interval=%ds)", name, interval)
-
         t = threading.Thread(
             target=_safe_loop,
             args=(name, mod),
@@ -159,13 +210,7 @@ def main() -> None:
         )
         t.start()
         threads.append(t)
-
-        # Stagger startup 10 s so modules don't hit ST/SS simultaneously
         time.sleep(10)
-
-    if not threads:
-        log.error("No modules running. Check ENABLED_MODULES in config.py and ST scope grants.")
-        sys.exit(1)
 
     log.info("%d sync thread(s) running.  Ctrl-C or SIGTERM to stop.", len(threads))
 

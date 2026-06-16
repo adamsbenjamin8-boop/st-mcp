@@ -1,89 +1,85 @@
 """
-Estimates sync — ST → Smartsheet Estimates sheet (created on first run).
+Estimates sync — ST → Smartsheet Estimates sheet.
 Runs every 15 minutes.
+Sheet ID 1600229966040964 (workspace: Service Titan Shuttle connection).
 """
 
 import logging
 import time
+from datetime import datetime, timezone, timedelta
 
 from . import st_api, smartsheet_client as ss
-from .config import (
-    ESTIMATES_SHEET_NAME, ESTIMATES_COLUMNS, SYNC_INTERVALS,
-)
+from .config import ESTIMATES_SHEET_ID, ESTIMATES_COLS, SYNC_INTERVALS
 
 log = logging.getLogger(__name__)
 
-_sheet_id: int | None = None
-_col_ids:  dict       = {}
-
-
-def _ensure_sheet() -> int:
-    global _sheet_id
-    if _sheet_id:
-        return _sheet_id
-    _sheet_id = ss.get_or_create_sheet(ESTIMATES_SHEET_NAME, ESTIMATES_COLUMNS)
-    return _sheet_id
-
-
-def _resolve_cols(sheet: dict) -> None:
-    global _col_ids
-    if _col_ids:
-        return
-    _col_ids = {c["title"]: c["id"] for c in sheet.get("columns", [])}
-
-
-def _col(title: str) -> int | None:
-    return _col_ids.get(title)
+_COL = ESTIMATES_COLS
+_KEY = _COL["estimate_id"]
 
 
 def _st_link(estimate_id) -> str:
     return f"https://go.servicetitan.com/#/new/sales/estimates/{estimate_id}"
 
 
+def _location_str(est: dict) -> str | None:
+    """Best-effort address string from estimate or its linked job."""
+    for src in (est, est.get("job") or {}):
+        loc  = src.get("location") or {}
+        addr = loc.get("address") or loc
+        if isinstance(addr, dict):
+            parts = ", ".join(filter(None, [
+                addr.get("street"), addr.get("city"), addr.get("state"),
+            ]))
+            if parts:
+                return parts
+    return None
+
+
 def _build_cells(est: dict) -> list:
     job = est.get("job") or {}
-    cells = []
-
-    def _add(title, value):
-        col = _col(title)
-        if col:
-            cells.append(ss.cell(col, value))
-
-    _add("Estimate ID",   est.get("id"))
-    _add("Estimate #",    est.get("number") or est.get("name"))
-    _add("Job ID",        est.get("jobId") or job.get("id"))
-    _add("Job #",         est.get("jobNumber") or job.get("number"))
-    _add("Customer Name", (est.get("customer") or {}).get("name"))
-    _add("Status",        est.get("status"))
-    _add("Total",         est.get("total") or (est.get("summary") or {}).get("total"))
-    _add("Created Date",  (est.get("createdOn") or "")[:10] or None)
-    _add("Sold Date",     (est.get("soldOn") or "")[:10] or None)
-    _add("Business Unit", (est.get("businessUnit") or {}).get("name"))
-    _add("Technician",    (est.get("technician") or {}).get("name"))
-    _add("Notes",         est.get("notes") or est.get("summary", {}).get("notes") if isinstance(est.get("summary"), dict) else None)
-
-    link_col = _col("ST Link")
-    if link_col:
-        cells.append(ss.cell_hyperlink(link_col, "View Estimate", _st_link(est.get("id"))))
-
+    bu  = est.get("businessUnit") or {}
+    tech = est.get("technician") or {}
+    cells = [
+        ss.cell(_COL["estimate_id"],      est.get("id")),
+        ss.cell(_COL["estimate_num"],     est.get("number") or est.get("name")),
+        ss.cell(_COL["job_id"],           est.get("jobId") or job.get("id")),
+        ss.cell(_COL["job_num"],          est.get("jobNumber") or job.get("number")),
+        ss.cell(_COL["customer_name"],    (est.get("customer") or {}).get("name")),
+        ss.cell(_COL["status"],           est.get("status")),
+        ss.cell(_COL["total"],            est.get("total") or (est.get("summary") or {}).get("total")),
+        ss.cell(_COL["created_date"],     (est.get("createdOn") or "")[:10] or None),
+        ss.cell(_COL["sold_date"],        (est.get("soldOn") or "")[:10] or None),
+        ss.cell(_COL["business_unit"],    bu.get("name")),
+        ss.cell(_COL["business_unit_id"], bu.get("id")),
+        ss.cell(_COL["technician"],       tech.get("name")),
+        ss.cell(_COL["location_address"], _location_str(est)),
+        ss.cell(_COL["notes"],            est.get("notes")),
+        ss.cell_hyperlink(_COL["st_link"], "View Estimate", _st_link(est.get("id"))),
+    ]
     return cells
 
 
-def sync_once() -> None:
-    log.info("[estimates] sync start")
+def sync_once(*, backfill: bool = False) -> None:
+    log.info("[estimates] sync start%s", " (backfill)" if backfill else "")
     try:
-        sheet_id = _ensure_sheet()
-        sheet    = ss.get_sheet(sheet_id)
-        _resolve_cols(sheet)
+        sheet    = ss.get_sheet(ESTIMATES_SHEET_ID)
+        existing = ss.get_cell_values(sheet, _KEY, list(_COL.values()))
 
-        key_col = _col("Estimate ID")
-        if not key_col:
-            log.error("[estimates] Estimate ID column missing — aborting")
-            return
+        modified_after = None
+        progress_cb = None
+        if not backfill:
+            interval = SYNC_INTERVALS["estimates"]
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=interval * 2)
+            modified_after = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            def progress_cb(fetched, total):
+                log.info("[estimates] Backfill: %d/%s records fetched",
+                         fetched, total if total is not None else "?")
 
-        existing = ss.get_cell_values(sheet, key_col, list(_col_ids.values()))
-
-        estimates = st_api.fetch_estimates()
+        estimates = st_api.fetch_estimates(
+            modified_after=modified_after,
+            progress_cb=progress_cb,
+        )
         log.info("[estimates] fetched %d from ST", len(estimates))
 
         to_add    = []
@@ -101,7 +97,7 @@ def sync_once() -> None:
                 changed  = any(
                     str(c.get("value", "") or "") != str(row_data.get(c["columnId"], "") or "")
                     for c in cells
-                    if c["columnId"] != key_col
+                    if c["columnId"] != _KEY
                 )
                 if changed:
                     to_update.append({"id": row_data["_row_id"], "cells": cells})
@@ -109,10 +105,10 @@ def sync_once() -> None:
                 to_add.append({"cells": cells, "toBottom": True})
 
         if to_add:
-            ss.add_rows(sheet_id, to_add)
+            ss.add_rows(ESTIMATES_SHEET_ID, to_add)
             log.info("[estimates] added %d rows", len(to_add))
         if to_update:
-            ss.update_rows(sheet_id, to_update)
+            ss.update_rows(ESTIMATES_SHEET_ID, to_update)
             log.info("[estimates] updated %d rows", len(to_update))
 
         log.info("[estimates] sync complete")
@@ -143,6 +139,7 @@ def writeback_to_st(changes: list[dict]) -> None:
         "new_value":   <value to write>,
       }
 
+    Only sell/dismiss status transitions are written; all other fields ignored.
     Silently skipped if tn.sal.estimates:w is not in the token scopes.
     """
     from . import capabilities
@@ -157,7 +154,6 @@ def writeback_to_st(changes: list[dict]) -> None:
             continue
         by_id.setdefault(eid, {})[ch["field"]] = ch.get("new_value", ch.get("value"))
 
-    # Only sell/dismiss status transitions are writable
     _WRITABLE = {"status"}
     for eid, fields in by_id.items():
         payload = {k: v for k, v in fields.items() if k in _WRITABLE}

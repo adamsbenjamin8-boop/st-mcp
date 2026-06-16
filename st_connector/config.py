@@ -119,39 +119,52 @@ TASKS_COLS = {
     "business_unit": 7914097401876356,
 }
 
-# Estimates — new sheet, created on first run
-ESTIMATES_SHEET_NAME = "Estimates"
-ESTIMATES_COLUMNS = [
-    {"title": "Estimate ID",   "type": "TEXT_NUMBER", "primary": True},
-    {"title": "Estimate #",    "type": "TEXT_NUMBER"},
-    {"title": "Job ID",        "type": "TEXT_NUMBER"},
-    {"title": "Job #",         "type": "TEXT_NUMBER"},
-    {"title": "Customer Name", "type": "TEXT_NUMBER"},
-    {"title": "Status",        "type": "PICKLIST",    "options": ["Open", "Sold", "Dismissed"]},
-    {"title": "Total",         "type": "TEXT_NUMBER"},
-    {"title": "Created Date",  "type": "DATE"},
-    {"title": "Sold Date",     "type": "DATE"},
-    {"title": "Business Unit", "type": "TEXT_NUMBER"},
-    {"title": "Technician",    "type": "TEXT_NUMBER"},
-    {"title": "Notes",         "type": "TEXT_NUMBER"},
-    {"title": "ST Link",       "type": "TEXT_NUMBER"},
-]
+# Estimates — sheet ID 1600229966040964 (workspace: Service Titan Shuttle connection)
+ESTIMATES_SHEET_ID = 1600229966040964
+ESTIMATES_COLS = {
+    "estimate_id":      3023527740739460,   # primary key
+    "estimate_num":     7527127368109956,
+    "job_id":           1897627833896836,
+    "job_num":          6401227461267332,
+    "customer_name":    4149427647582084,
+    "status":           8653027274952580,   # PICKLIST: Open/Sold/Dismissed
+    "total":            490252950343556,
+    "created_date":     4993852577714052,
+    "sold_date":        2742052764028804,
+    "business_unit":    7245652391399300,
+    "business_unit_id": 1616152857186180,
+    "technician":       6119752484556676,
+    "location_address": 3867952670871428,
+    "notes":            8371552298241924,
+    "st_link":          1053202903764868,
+}
 
-# POs — new sheet, created on first run
-POS_SHEET_NAME = "Purchase Orders"
-POS_COLUMNS = [
-    {"title": "PO ID",         "type": "TEXT_NUMBER", "primary": True},
-    {"title": "PO #",          "type": "TEXT_NUMBER"},
-    {"title": "Job ID",        "type": "TEXT_NUMBER"},
-    {"title": "Job #",         "type": "TEXT_NUMBER"},
-    {"title": "Vendor",        "type": "TEXT_NUMBER"},
-    {"title": "Status",        "type": "PICKLIST",    "options": ["Open", "Closed", "Cancelled"]},
-    {"title": "Total",         "type": "TEXT_NUMBER"},
-    {"title": "Created Date",  "type": "DATE"},
-    {"title": "Required Date", "type": "DATE"},
-    {"title": "Business Unit", "type": "TEXT_NUMBER"},
-    {"title": "ST Link",       "type": "TEXT_NUMBER"},
-]
+# Purchase Orders — sheet ID 7840808857194372 (workspace: Service Titan Shuttle connection)
+POS_SHEET_ID = 7840808857194372
+POS_COLS = {
+    "po_id":            5796079991033732,   # primary key
+    "po_num":           3544280177348484,
+    "job_id":           8047879804718980,
+    "job_num":          729530410241924,
+    "vendor":           5233130037612420,
+    "vendor_id":        2981330223927172,
+    "status":           7484929851297668,   # PICKLIST: Open/Submitted/PartiallyReceived/Received/Closed/Cancelled
+    "total":            1855430317084548,
+    "created_date":     6359029944455044,
+    "required_date":    4107230130769796,
+    "business_unit":    8610829758140292,
+    "business_unit_id": 448055433531268,
+    "ship_to":          4951655060901764,
+    "notes":            2699855247216516,
+    "st_link":          7203454874587012,
+}
+
+# ---------------------------------------------------------------------------
+# Backfill / sync state
+# ---------------------------------------------------------------------------
+# .sync_state.json is written after the first full historical backfill.
+# Delete this file to force a fresh backfill on the next connector start.
+SYNC_STATE_FILE = Path(__file__).parent / ".sync_state.json"
 
 # ---------------------------------------------------------------------------
 # Sync intervals (seconds)

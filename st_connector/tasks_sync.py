@@ -51,13 +51,27 @@ def _build_cells(task: dict) -> list:
     ]
 
 
-def sync_once() -> None:
-    log.info("[tasks] sync start")
+def sync_once(*, backfill: bool = False) -> None:
+    log.info("[tasks] sync start%s", " (backfill)" if backfill else "")
     try:
         sheet    = ss.get_sheet(TASKS_SHEET_ID)
         existing = ss.get_cell_values(sheet, _KEY, list(_COL.values()))
 
-        tasks = st_api.fetch_tasks()
+        modified_after = None
+        progress_cb = None
+        if not backfill:
+            interval = SYNC_INTERVALS["tasks"]
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=interval * 2)
+            modified_after = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            def progress_cb(fetched, total):
+                log.info("[tasks] Backfill: %d/%s records fetched",
+                         fetched, total if total is not None else "?")
+
+        tasks = st_api.fetch_tasks(
+            modified_after=modified_after,
+            progress_cb=progress_cb,
+        )
         log.info("[tasks] fetched %d from ST", len(tasks))
 
         to_add    = []

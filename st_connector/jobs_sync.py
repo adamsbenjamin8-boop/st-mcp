@@ -10,6 +10,7 @@ Removal rules:
 
 import logging
 import time
+from datetime import datetime, timezone, timedelta
 
 from . import st_api, smartsheet_client as ss
 from .config import JOBS_SHEET_ID, JOBS_COL_NAMES, SYNC_INTERVALS
@@ -94,8 +95,8 @@ def _build_cells(job: dict, note_suffix: str = "") -> list:
     return cells
 
 
-def sync_once() -> None:
-    log.info("[jobs] sync start")
+def sync_once(*, backfill: bool = False) -> None:
+    log.info("[jobs] sync start%s", " (backfill)" if backfill else "")
     try:
         sheet = ss.get_sheet(JOBS_SHEET_ID)
         _resolve_cols(sheet)
@@ -107,7 +108,21 @@ def sync_once() -> None:
 
         existing = ss.get_cell_values(sheet, key_col, list(_col_ids.values()))
 
-        jobs = st_api.fetch_jobs()
+        modified_after = None
+        progress_cb = None
+        if not backfill:
+            interval = SYNC_INTERVALS["jobs"]
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=interval * 2)
+            modified_after = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            def progress_cb(fetched, total):
+                log.info("[jobs] Backfill: %d/%s records fetched",
+                         fetched, total if total is not None else "?")
+
+        jobs = st_api.fetch_jobs(
+            modified_after=modified_after,
+            progress_cb=progress_cb,
+        )
         log.info("[jobs] fetched %d from ST", len(jobs))
 
         to_add    = []

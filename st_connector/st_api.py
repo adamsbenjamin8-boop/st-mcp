@@ -58,14 +58,23 @@ def patch(api: str, path: str, payload: dict) -> dict:
     return r.json() if r.content else {}
 
 
-def get_all(api: str, path: str, params: dict = None, page_size: int = 500) -> list:
-    """Paginated GET — returns all items across all pages."""
+def get_all(api: str, path: str, params: dict = None, page_size: int = 500,
+            progress_cb=None) -> list:
+    """Paginated GET — returns all items across all pages.
+
+    progress_cb(fetched: int, total: int | None) is called after each page.
+    """
     p = {**(params or {}), "page": 1, "pageSize": page_size}
     results = []
+    total = None
     while True:
         data = get(api, path, p)
         items = data.get("data", [])
         results.extend(items)
+        if total is None:
+            total = data.get("totalCount")
+        if progress_cb:
+            progress_cb(len(results), total)
         if not data.get("hasMore", False):
             break
         p["page"] += 1
@@ -76,43 +85,56 @@ def get_all(api: str, path: str, params: dict = None, page_size: int = 500) -> l
 # Entity-specific fetchers
 # ---------------------------------------------------------------------------
 
-def fetch_appointments(extra_params: dict = None) -> list:
-    params = {
-        "startsOnOrAfter": None,  # callers can override
-        **(extra_params or {}),
-    }
-    # Remove None values
-    params = {k: v for k, v in params.items() if v is not None}
-    return get_all("dispatch", "appointments", params)
+def fetch_appointments(extra_params: dict = None, modified_after: str = None,
+                       progress_cb=None) -> list:
+    params = {**(extra_params or {})}
+    if modified_after:
+        params["modifiedOnOrAfter"] = modified_after
+    return get_all("dispatch", "appointments", params, progress_cb=progress_cb)
 
 
-def fetch_jobs(extra_params: dict = None) -> list:
+def fetch_jobs(extra_params: dict = None, modified_after: str = None,
+               progress_cb=None) -> list:
     params = {
         "jobStatus": "InProgress,Scheduled,Dispatched,Hold,Cancelled,Completed",
         **(extra_params or {}),
     }
-    return get_all("jpm", "jobs", params)
+    if modified_after:
+        params["modifiedOnOrAfter"] = modified_after
+    return get_all("jpm", "jobs", params, progress_cb=progress_cb)
 
 
-def fetch_invoices(extra_params: dict = None) -> list:
+def fetch_invoices(extra_params: dict = None, modified_after: str = None,
+                   progress_cb=None) -> list:
     params = {**(extra_params or {})}
-    return get_all("accounting", "invoices", params)
+    if modified_after:
+        params["modifiedOnOrAfter"] = modified_after
+    return get_all("accounting", "invoices", params, progress_cb=progress_cb)
 
 
-def fetch_tasks(extra_params: dict = None) -> list:
+def fetch_tasks(extra_params: dict = None, modified_after: str = None,
+                progress_cb=None) -> list:
     """Job orders / tasks."""
     params = {**(extra_params or {})}
-    return get_all("jpm", "job-orders", params)
+    if modified_after:
+        params["modifiedOnOrAfter"] = modified_after
+    return get_all("jpm", "job-orders", params, progress_cb=progress_cb)
 
 
-def fetch_estimates(extra_params: dict = None) -> list:
+def fetch_estimates(extra_params: dict = None, modified_after: str = None,
+                    progress_cb=None) -> list:
     params = {**(extra_params or {})}
-    return get_all("sales", "estimates", params)
+    if modified_after:
+        params["modifiedOnOrAfter"] = modified_after
+    return get_all("sales", "estimates", params, progress_cb=progress_cb)
 
 
-def fetch_purchase_orders(extra_params: dict = None) -> list:
+def fetch_purchase_orders(extra_params: dict = None, modified_after: str = None,
+                          progress_cb=None) -> list:
     params = {**(extra_params or {})}
-    return get_all("inventory", "purchase-orders", params)
+    if modified_after:
+        params["modifiedOnOrAfter"] = modified_after
+    return get_all("inventory", "purchase-orders", params, progress_cb=progress_cb)
 
 
 def get_job(job_id: int) -> dict:
