@@ -111,11 +111,10 @@ def fetch_invoices(extra_params: dict = None, modified_after: str = None,
 
 def fetch_tasks(extra_params: dict = None, modified_after: str = None,
                 progress_cb=None) -> list:
-    """Job orders / tasks."""
     params = {**(extra_params or {})}
     if modified_after:
         params["modifiedOnOrAfter"] = modified_after
-    return get_all("jpm", "job-orders", params, progress_cb=progress_cb)
+    return get_all("taskmanagement", "tasks", params, progress_cb=progress_cb)
 
 
 def fetch_estimates(extra_params: dict = None, modified_after: str = None,

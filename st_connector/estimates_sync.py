@@ -46,7 +46,7 @@ def _build_cells(est: dict) -> list:
         ss.cell(_COL["job_num"],          est.get("jobNumber") or job.get("number")),
         ss.cell(_COL["customer_name"],    (est.get("customer") or {}).get("name")),
         ss.cell(_COL["status"],           est.get("status")),
-        ss.cell(_COL["total"],            est.get("total") or (est.get("summary") or {}).get("total")),
+        ss.cell(_COL["total"],            est.get("total") or sum(item.get("total") or 0 for item in est.get("items", []))),
         ss.cell(_COL["created_date"],     (est.get("createdOn") or "")[:10] or None),
         ss.cell(_COL["sold_date"],        (est.get("soldOn") or "")[:10] or None),
         ss.cell(_COL["business_unit"],    bu.get("name")),

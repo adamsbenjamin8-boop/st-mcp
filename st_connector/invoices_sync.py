@@ -18,8 +18,7 @@ _KEY = _COL["invoice_id"]
 
 
 def _build_cells(inv: dict) -> list:
-    job     = inv.get("job") or {}
-    summary = inv.get("summary") or {}
+    job = inv.get("job") or {}
     return [
         ss.cell(_COL["invoice_id"],    inv.get("id")),
         ss.cell(_COL["invoice_num"],   inv.get("number")),
@@ -28,24 +27,23 @@ def _build_cells(inv: dict) -> list:
         ss.cell(_COL["customer_name"], (inv.get("customer") or {}).get("name")),
         ss.cell(_COL["status"],        inv.get("status")),
         ss.cell(_COL["invoice_date"],  (inv.get("invoiceDate") or "")[:10] or None),
-        ss.cell(_COL["total"],         summary.get("total") or inv.get("total")),
-        ss.cell(_COL["balance"],       summary.get("balance") or inv.get("balance")),
+        ss.cell(_COL["total"],         inv.get("total")),
+        ss.cell(_COL["balance"],       inv.get("balance")),
         ss.cell(_COL["batch_number"],  inv.get("batchNumber")),
         ss.cell(_COL["export_id"],     inv.get("exportId")),
         ss.cell(_COL["business_unit"], (inv.get("businessUnit") or {}).get("name")),
-        ss.cell(_COL["labor_costs"],   summary.get("laborCost") or inv.get("laborCost")),
-        ss.cell(_COL["material_costs"],summary.get("materialCost") or inv.get("materialCost")),
+        ss.cell(_COL["labor_costs"],   inv.get("laborCost")),
+        ss.cell(_COL["material_costs"],inv.get("materialCost")),
         ss.cell(_COL["is_adjustment"], bool(inv.get("isAdjustment", False))),
-        ss.cell(_COL["income"],        summary.get("income") or inv.get("income")),
-        ss.cell(_COL["labor"],         summary.get("labor") or inv.get("labor")),
+        ss.cell(_COL["income"],        inv.get("income")),
+        ss.cell(_COL["labor"],         inv.get("labor")),
         ss.cell(_COL["notes"],         inv.get("invoiceNotes") or inv.get("notes")),
-        ss.cell(_COL["costs_total"],   summary.get("costsTotal") or inv.get("costsTotal")),
+        ss.cell(_COL["costs_total"],   inv.get("costsTotal")),
     ]
 
 
 def _is_empty(inv: dict) -> bool:
-    summary = inv.get("summary") or {}
-    total   = summary.get("total") or inv.get("total") or 0
+    total = inv.get("total") or 0
     try:
         return float(total) == 0
     except (TypeError, ValueError):
