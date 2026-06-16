@@ -176,7 +176,7 @@ def writeback_to_st(changes: list[dict]) -> None:
         if not payload:
             continue
         try:
-            st_api.patch("dispatch", f"appointments/{aid}", payload)
+            st_api.patch("jpm", f"appointments/{aid}", payload)
             log.info("[appointments] patched %s: %s", aid, list(payload))
         except Exception as exc:
             log.error("[appointments] patch failed for appt %s: %s", aid, exc)

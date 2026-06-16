@@ -4,8 +4,8 @@ Runs every 15 minutes.
 
 Removal rules:
   - Completed + invoice exported  → delete row
-  - Cancelled + no cost (cost=0)  → delete row
-  - Cancelled + cost > 0          → keep, append "[Cancelled-W/Cost]" to notes
+  - Canceled + no cost (cost=0)   → delete row
+  - Canceled + cost > 0           → keep, append "[Canceled-W/Cost]" to notes
 """
 
 import logging
@@ -13,29 +13,17 @@ import time
 from datetime import datetime, timezone, timedelta
 
 from . import st_api, smartsheet_client as ss
-from .config import JOBS_SHEET_ID, JOBS_COL_NAMES, SYNC_INTERVALS
+from .config import JOBS_SHEET_ID, JOBS_COLS, SYNC_INTERVALS
 
 log = logging.getLogger(__name__)
 
-# Resolved at first sync call via col_map_from_sheet
-_col_ids: dict = {}
-
-
-def _resolve_cols(sheet: dict) -> None:
-    global _col_ids
-    if _col_ids:
-        return
-    cmap = ss.col_map_from_sheet(sheet)
-    for key, title in JOBS_COL_NAMES.items():
-        col_id = cmap.get(title.lower())
-        if col_id:
-            _col_ids[key] = col_id
-        else:
-            log.warning("[jobs] column not found in sheet: '%s'", title)
+_STATUS_MAP = {
+    "InProgress": "In Progress",
+}
 
 
 def _col(key: str) -> int | None:
-    return _col_ids.get(key)
+    return JOBS_COLS.get(key)
 
 
 def _invoice_exported(job: dict) -> bool:
@@ -46,8 +34,7 @@ def _invoice_exported(job: dict) -> bool:
 
 def _job_cost(job: dict) -> float:
     inv = job.get("invoice") or {}
-    summary = inv.get("summary") or {}
-    total = summary.get("total") or inv.get("total") or 0
+    total = inv.get("total") or 0
     try:
         return float(total)
     except (TypeError, ValueError):
@@ -55,20 +42,18 @@ def _job_cost(job: dict) -> float:
 
 
 def _build_cells(job: dict, note_suffix: str = "") -> list:
-    inv     = job.get("invoice") or {}
-    inv_sum = inv.get("summary") or {}
-    loc     = job.get("location") or {}
-    addr    = loc.get("address") or {}
+    inv  = job.get("invoice") or {}
+    loc  = job.get("location") or {}
+    addr = loc.get("address") or {}
     address_str = ", ".join(filter(None, [
         addr.get("street"), addr.get("city"), addr.get("state"),
     ]))
-    first_tech = ""
-    for appt in (job.get("appointments") or []):
-        for tech in (appt.get("technicians") or []):
-            first_tech = tech.get("name", "")
-            break
-        if first_tech:
-            break
+
+    raw_status = job.get("status", "")
+    status = _STATUS_MAP.get(raw_status, raw_status)
+
+    tagged = job.get("taggedTechnicians") or []
+    assigned_techs = ", ".join(t.get("name", "") for t in tagged if t.get("name"))
 
     cells = []
     def _add(key, value):
@@ -76,21 +61,26 @@ def _build_cells(job: dict, note_suffix: str = "") -> list:
         if col:
             cells.append(ss.cell(col, value))
 
-    _add("job_id",          job.get("id"))
-    _add("job_num",         job.get("number"))
-    _add("invoice_id",      inv.get("id"))
-    _add("customer_name",   (job.get("customer") or {}).get("name"))
-    _add("status",          job.get("status"))
-    _add("created_date",    (job.get("createdOn") or "")[:10] or None)
-    _add("first_dispatch",  (job.get("firstAppointmentDate") or "")[:10] or None)
-    _add("completion_date", (job.get("completedOn") or "")[:10] or None)
-    _add("location",        address_str or None)
-    _add("job_type",        (job.get("type") or {}).get("name"))
-    _add("invoice_status",  inv.get("status"))
-    _add("total",           inv_sum.get("total") or inv.get("total"))
-    _add("balance",         inv_sum.get("balance") or inv.get("balance"))
-    _add("batch_number",    inv.get("batchNumber"))
-    _add("business_unit",   (job.get("businessUnit") or {}).get("name"))
+    _add("job_num",              job.get("number"))
+    _add("job_id",               job.get("id"))
+    _add("status",               status)
+    _add("customer_name",        (job.get("customer") or {}).get("name"))
+    _add("customer_address",     address_str or None)
+    _add("business_unit_id",     (job.get("businessUnit") or {}).get("id"))
+    _add("business_unit",        (job.get("businessUnit") or {}).get("name"))
+    _add("scheduled_date",       (job.get("start") or "")[:10] or None)
+    _add("completion_date",      (job.get("completedOn") or "")[:10] or None)
+    _add("job_type",             (job.get("type") or {}).get("name"))
+    _add("invoice_num",          inv.get("number"))
+    _add("jobs_total",           inv.get("total"))
+    _add("customer_id",          (job.get("customer") or {}).get("id"))
+    _add("location_id",          loc.get("id"))
+    _add("assigned_technicians", assigned_techs or None)
+    _add("sold_by",              (job.get("soldBy") or {}).get("name"))
+    _add("primary_technician",   (job.get("assignedTo") or {}).get("name"))
+    _add("first_dispatch",       (job.get("firstAppointmentDate") or "")[:10] or None)
+    _add("invoice_date",         (inv.get("date") or "")[:10] or None)
+    _add("created_date",         (job.get("createdOn") or "")[:10] or None)
 
     return cells
 
@@ -99,14 +89,13 @@ def sync_once(*, backfill: bool = False) -> None:
     log.info("[jobs] sync start%s", " (backfill)" if backfill else "")
     try:
         sheet = ss.get_sheet(JOBS_SHEET_ID)
-        _resolve_cols(sheet)
 
         key_col = _col("job_id")
         if not key_col:
             log.error("[jobs] could not resolve job_id column — aborting sync")
             return
 
-        existing = ss.get_cell_values(sheet, key_col, list(_col_ids.values()))
+        existing = ss.get_cell_values(sheet, key_col, list(JOBS_COLS.values()))
 
         modified_after = None
         progress_cb = None
@@ -144,13 +133,13 @@ def sync_once(*, backfill: bool = False) -> None:
                     to_delete.append(existing[job_id]["_row_id"])
                 continue
 
-            if status == "Cancelled" and cost == 0:
+            if status == "Canceled" and cost == 0:
                 if job_id in existing:
                     to_delete.append(existing[job_id]["_row_id"])
                 continue
 
-            # Cancelled with cost — mark it
-            note_suffix = " [Cancelled-W/Cost]" if status == "Cancelled" and cost > 0 else ""
+            # Canceled with cost — mark it
+            note_suffix = " [Canceled-W/Cost]" if status == "Canceled" and cost > 0 else ""
             cells = _build_cells(job, note_suffix)
 
             if job_id in existing:

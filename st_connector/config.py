@@ -84,24 +84,28 @@ INVOICE_COLS = {
 }
 
 # Jobs KPI — sheet ID 8773592040820612
-# Column IDs are looked up dynamically by title on first sync (see jobs_sync.py)
-JOBS_SHEET_ID    = 8773592040820612
-JOBS_COL_NAMES = {
-    "job_id":           "Job ID",
-    "job_num":          "Job #",
-    "invoice_id":       "Invoice ID",
-    "customer_name":    "Customer Name",
-    "status":           "Job Status",
-    "created_date":     "Created Date",
-    "first_dispatch":   "First Dispatch",
-    "completion_date":  "Completion Date",
-    "location":         "Location Address",
-    "job_type":         "Job Type",
-    "invoice_status":   "Invoice Status",
-    "total":            "Total",
-    "balance":          "Balance",
-    "batch_number":     "Batch Number",
-    "business_unit":    "Business Unit",
+JOBS_SHEET_ID = 8773592040820612
+JOBS_COLS = {
+    "job_num":              2389438416244612,   # Job # (primary column)
+    "job_id":               8200910226542468,   # Job ID (ST numeric id, sync key)
+    "status":               5767138136772484,   # Status (picklist: Hold/In Progress/Scheduled)
+    "customer_name":        6893038043615108,   # Customer Name
+    "customer_address":     1263538509401988,   # Customer Address
+    "business_unit_id":     7637960273121156,   # Business Unit ID
+    "business_unit":        3515338323087236,   # Business Unit
+    "scheduled_date":       8018937950457732,   # Scheduled Date
+    "completion_date":      700588555980676,    # Completion Date
+    "job_type":             4823210506014596,   # Job Type
+    "invoice_num":          5949110412857220,   # Invoice #
+    "jobs_total":           3697310599171972,   # Jobs Total
+    "customer_id":          6582429110456196,   # Customer ID
+    "location_id":          4752841761836932,   # Location ID
+    "assigned_technicians": 6160216645390212,   # Assigned Technicians
+    "sold_by":              3908416831704964,   # Sold By
+    "primary_technician":   5597266691968900,   # Primary Technician
+    "first_dispatch":       5738004180324228,   # First Dispatch
+    "invoice_date":         7145379063877508,   # Invoice Date
+    "created_date":         137638602559364,    # Created Date
 }
 
 # Tasks-KPI — sheet ID 2996979944607620

@@ -90,15 +90,12 @@ def fetch_appointments(extra_params: dict = None, modified_after: str = None,
     params = {**(extra_params or {})}
     if modified_after:
         params["modifiedOnOrAfter"] = modified_after
-    return get_all("dispatch", "appointments", params, progress_cb=progress_cb)
+    return get_all("jpm", "appointments", params, progress_cb=progress_cb)
 
 
 def fetch_jobs(extra_params: dict = None, modified_after: str = None,
                progress_cb=None) -> list:
-    params = {
-        "jobStatus": "InProgress,Scheduled,Dispatched,Hold,Cancelled,Completed",
-        **(extra_params or {}),
-    }
+    params = {**(extra_params or {})}
     if modified_after:
         params["modifiedOnOrAfter"] = modified_after
     return get_all("jpm", "jobs", params, progress_cb=progress_cb)
