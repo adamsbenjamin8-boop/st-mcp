@@ -61,7 +61,7 @@ APPT_READONLY_COLS = {
 # Invoice Report KPI — sheet ID 3671995526893444
 INVOICE_SHEET_ID = 3671995526893444
 INVOICE_COLS = {
-    "invoice_id":    2008460738908036,   # ST invoice ID (unique key)
+    "invoice_id":    324375754264452,    # ST invoice ID (unique key)
     "invoice_num":   7824066694303620,
     "job_id":        4827975381634948,
     "job_num":       2194567160090500,
@@ -72,7 +72,7 @@ INVOICE_COLS = {
     "balance":       48320462671748,
     "batch_number":  1174220369514372,
     "export_id":     7929619810570116,
-    "business_unit": 5178507136814980,
+    "business_unit": 2300120276356996,   # Invoice Business Unit (name)
     "labor_costs":   5677819996884868,
     "material_costs":5114870043463556,
     "is_adjustment": 3426020183199620,   # CHECKBOX
