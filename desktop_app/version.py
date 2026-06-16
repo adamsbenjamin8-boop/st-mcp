@@ -3,7 +3,7 @@ Version tracking for the ST MCP Desktop App.
 This file is updated automatically by the GitHub Actions release workflow.
 """
 
-APP_VERSION = "2.36"
+APP_VERSION = "2.45"
 GITHUB_REPO  = "adamsbenjamin8-boop/st-mcp"
 UPDATE_FILES = [
     "servicetitan_writer.py",
@@ -31,6 +31,19 @@ UPDATE_FILES = [
     "quote_parsers/tunstall_corporation.py",
     "quote_parsers/plumbers_supply_co.py",
     "quote_parsers/trane_u_s__inc.py",
+    # ST Connector — Smartsheet sync service
+    # Note: __init__.py and config.py excluded to avoid basename collisions
+    "st_connector_runner.py",
+    "st_connector/st_api.py",
+    "st_connector/smartsheet_client.py",
+    "st_connector/capabilities.py",
+    "st_connector/connector_main.py",
+    "st_connector/appointments_sync.py",
+    "st_connector/jobs_sync.py",
+    "st_connector/invoices_sync.py",
+    "st_connector/tasks_sync.py",
+    "st_connector/estimates_sync.py",
+    "st_connector/pos_sync.py",
 ]
 
 

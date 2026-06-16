@@ -51,10 +51,11 @@ def _find_python() -> Path:
                     return exe
     return Path("python.exe")
 
-PYTHON_EXE        = _find_python()
-WRITER_SCRIPT     = APP_DIR / "servicetitan_writer.py"
-CACHE_SYNC_SCRIPT = APP_DIR / "st_cache_sync.py"
-LOCK_FILE         = APP_DIR / "st_mcp.lock"
+PYTHON_EXE             = _find_python()
+WRITER_SCRIPT          = APP_DIR / "servicetitan_writer.py"
+CACHE_SYNC_SCRIPT      = APP_DIR / "st_cache_sync.py"
+ST_CONNECTOR_SCRIPT    = APP_DIR / "st_connector_runner.py"
+LOCK_FILE              = APP_DIR / "st_mcp.lock"
 
 def _acquire_single_instance_lock() -> bool:
     if LOCK_FILE.exists():
@@ -83,10 +84,13 @@ def _release_single_instance_lock():
 # Process Manager
 # ---------------------------------------------------------------------------
 class ManagedProcess:
-    def __init__(self, name: str, script: Path, env: Optional[dict] = None):
+    def __init__(self, name: str, script: Path, env: Optional[dict] = None,
+                 log_path: Optional[Path] = None):
         self.name      = name
         self.script    = script
         self.env       = env or {}
+        self._log_path = log_path
+        self._log_file = None
         self._proc: Optional[subprocess.Popen] = None
         self._lock     = threading.Lock()
         self.last_start: Optional[datetime] = None
@@ -106,12 +110,24 @@ class ManagedProcess:
             if self._proc and self._proc.poll() is None:
                 return
             env = {**os.environ, **self.env}
+            if self._log_path:
+                try:
+                    if self._log_file:
+                        self._log_file.close()
+                except Exception:
+                    pass
+                self._log_file = open(self._log_path, "a", encoding="utf-8")
+                stdout = self._log_file
+                stderr = self._log_file
+            else:
+                stdout = subprocess.PIPE
+                stderr = subprocess.STDOUT
             self._proc = subprocess.Popen(
                 [str(PYTHON_EXE), str(self.script)],
                 env=env,
                 stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stdout=stdout,
+                stderr=stderr,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             )
             self.last_start    = datetime.now()
@@ -136,8 +152,14 @@ class ManagedProcess:
 class ProcessManager:
     def __init__(self):
         creds = _load_credentials()
-        self.writer = ManagedProcess(name="ST Writer MCP", script=WRITER_SCRIPT, env=creds)
-        self._processes = [self.writer]
+        self.writer    = ManagedProcess(name="ST Writer MCP", script=WRITER_SCRIPT, env=creds)
+        self.connector = ManagedProcess(
+            name="ST Connector",
+            script=ST_CONNECTOR_SCRIPT,
+            env=creds,
+            log_path=APP_DIR / "st_connector.log",
+        )
+        self._processes = [self.writer, self.connector]
         self._monitor_thread: Optional[threading.Thread] = None
         self._running = False
         self.cache_sync    = CacheSyncManager(env=creds)

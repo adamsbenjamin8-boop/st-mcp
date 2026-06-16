@@ -87,6 +87,17 @@ jobs:
               'quote_parsers/tunstall_corporation.py',
               'quote_parsers/plumbers_supply_co.py',
               'quote_parsers/trane_u_s__inc.py',
+              'st_connector_runner.py',
+              'st_connector/st_api.py',
+              'st_connector/smartsheet_client.py',
+              'st_connector/capabilities.py',
+              'st_connector/connector_main.py',
+              'st_connector/appointments_sync.py',
+              'st_connector/jobs_sync.py',
+              'st_connector/invoices_sync.py',
+              'st_connector/tasks_sync.py',
+              'st_connector/estimates_sync.py',
+              'st_connector/pos_sync.py',
           ]
           lines = []
           for path in files:
@@ -129,6 +140,17 @@ jobs:
             quote_parsers/tunstall_corporation.py `
             quote_parsers/plumbers_supply_co.py `
             quote_parsers/trane_u_s__inc.py `
+            st_connector_runner.py `
+            st_connector/st_api.py `
+            st_connector/smartsheet_client.py `
+            st_connector/capabilities.py `
+            st_connector/connector_main.py `
+            st_connector/appointments_sync.py `
+            st_connector/jobs_sync.py `
+            st_connector/invoices_sync.py `
+            st_connector/tasks_sync.py `
+            st_connector/estimates_sync.py `
+            st_connector/pos_sync.py `
             checksums.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -143,6 +165,17 @@ jobs:
             st_cache_sync.py `
             desktop_app/version.py `
             desktop_app/build/Output/ST_MCP_Setup.exe `
+            st_connector_runner.py `
+            st_connector/st_api.py `
+            st_connector/smartsheet_client.py `
+            st_connector/capabilities.py `
+            st_connector/connector_main.py `
+            st_connector/appointments_sync.py `
+            st_connector/jobs_sync.py `
+            st_connector/invoices_sync.py `
+            st_connector/tasks_sync.py `
+            st_connector/estimates_sync.py `
+            st_connector/pos_sync.py `
             checksums.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
