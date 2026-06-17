@@ -150,9 +150,9 @@ def sync_once(*, backfill: bool = False) -> None:
                     if c["columnId"] != key_col
                 )
                 if changed:
-                    to_update.append({"id": row_data["_row_id"], "cells": cells})
+                    to_update.append({"id": row_data["_row_id"], "cells": cells, "strict": False})
             else:
-                to_add.append({"cells": cells, "toBottom": True})
+                to_add.append({"cells": cells, "toBottom": True, "strict": False})
 
         if to_add:
             ss.add_rows(JOBS_SHEET_ID, to_add)
