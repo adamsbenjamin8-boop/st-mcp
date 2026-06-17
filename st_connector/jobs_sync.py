@@ -1,11 +1,8 @@
 """
 Jobs sync — ST → Smartsheet Jobs KPI sheet.
 Runs every 15 minutes.
-
-Removal rules:
-  - Completed + invoice exported  → delete row
-  - Canceled + no cost (cost=0)   → delete row
-  - Canceled + cost > 0           → keep, append "[Canceled-W/Cost]" to notes
+Keeps only active jobs: Scheduled, InProgress, Hold.
+Deletes rows when status transitions to Completed or Canceled.
 """
 
 import logging
@@ -26,22 +23,7 @@ def _col(key: str) -> int | None:
     return JOBS_COLS.get(key)
 
 
-def _invoice_exported(job: dict) -> bool:
-    """Check if the job's invoice status is Exported."""
-    inv = job.get("invoice") or {}
-    return inv.get("status", "") == "Exported"
-
-
-def _job_cost(job: dict) -> float:
-    inv = job.get("invoice") or {}
-    total = inv.get("total") or 0
-    try:
-        return float(total)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _build_cells(job: dict, note_suffix: str = "") -> list:
+def _build_cells(job: dict) -> list:
     inv  = job.get("invoice") or {}
     loc  = job.get("location") or {}
     addr = loc.get("address") or {}
@@ -123,24 +105,15 @@ def sync_once(*, backfill: bool = False) -> None:
             if not job_id:
                 continue
 
-            status   = job.get("status", "")
-            exported = _invoice_exported(job)
-            cost     = _job_cost(job)
+            status = job.get("status", "")
 
-            # Deletion rules
-            if status == "Completed" and exported:
+            # Remove inactive jobs — only Scheduled/InProgress/Hold stay in the sheet
+            if status in ("Completed", "Canceled"):
                 if job_id in existing:
                     to_delete.append(existing[job_id]["_row_id"])
                 continue
 
-            if status == "Canceled" and cost == 0:
-                if job_id in existing:
-                    to_delete.append(existing[job_id]["_row_id"])
-                continue
-
-            # Canceled with cost — mark it
-            note_suffix = " [Canceled-W/Cost]" if status == "Canceled" and cost > 0 else ""
-            cells = _build_cells(job, note_suffix)
+            cells = _build_cells(job)
 
             if job_id in existing:
                 row_data = existing[job_id]

@@ -129,6 +129,12 @@ def sync_once(*, backfill: bool = False) -> None:
             job_id = appt.get("jobId")
             job    = job_map.get(job_id) if job_id else None
 
+            if appt.get("status") in ("Canceled", "Cancelled"):
+                if appt_id in existing:
+                    to_delete.append(existing[appt_id]["_row_id"])
+                _excluded.pop(appt_id, None)
+                continue
+
             if _is_stale(appt):
                 if appt_id in existing:
                     to_delete.append(existing[appt_id]["_row_id"])

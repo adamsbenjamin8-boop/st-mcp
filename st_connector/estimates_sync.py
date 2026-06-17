@@ -84,10 +84,16 @@ def sync_once(*, backfill: bool = False) -> None:
 
         to_add    = []
         to_update = []
+        to_delete = []
 
         for est in estimates:
             est_id = str(est.get("id", ""))
             if not est_id:
+                continue
+
+            if est.get("status") in ("Dismissed", "Expired"):
+                if est_id in existing:
+                    to_delete.append(existing[est_id]["_row_id"])
                 continue
 
             cells = _build_cells(est)
@@ -110,6 +116,9 @@ def sync_once(*, backfill: bool = False) -> None:
         if to_update:
             ss.update_rows(ESTIMATES_SHEET_ID, to_update)
             log.info("[estimates] updated %d rows", len(to_update))
+        if to_delete:
+            ss.delete_rows(ESTIMATES_SHEET_ID, to_delete)
+            log.info("[estimates] deleted %d inactive rows", len(to_delete))
 
         log.info("[estimates] sync complete")
     except Exception as e:

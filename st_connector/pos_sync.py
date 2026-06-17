@@ -101,10 +101,16 @@ def sync_once(*, backfill: bool = False) -> None:
 
         to_add    = []
         to_update = []
+        to_delete = []
 
         for po in pos:
             po_id = str(po.get("id", ""))
             if not po_id:
+                continue
+
+            if po.get("status") in ("Canceled", "Received"):
+                if po_id in existing:
+                    to_delete.append(existing[po_id]["_row_id"])
                 continue
 
             cells = _build_cells(po)
@@ -127,6 +133,9 @@ def sync_once(*, backfill: bool = False) -> None:
         if to_update:
             ss.update_rows(POS_SHEET_ID, to_update)
             log.info("[pos] updated %d rows", len(to_update))
+        if to_delete:
+            ss.delete_rows(POS_SHEET_ID, to_delete)
+            log.info("[pos] deleted %d inactive rows", len(to_delete))
 
         log.info("[pos] sync complete")
     except Exception as e:

@@ -82,10 +82,11 @@ def sync_once(*, backfill: bool = False) -> None:
             if not inv_id:
                 continue
 
-            status = inv.get("status", "")
+            status      = inv.get("status", "")
+            sync_status = inv.get("syncStatus", "")
 
-            # Remove rows for exported invoices
-            if status == "Exported":
+            # Remove rows for exported/bypassed/paid/void invoices
+            if sync_status in ("Exported", "Bypassed") or status in ("Exported", "Paid", "Void"):
                 if inv_id in existing:
                     to_delete.append(existing[inv_id]["_row_id"])
                 continue

@@ -1,8 +1,8 @@
 """
 Tasks sync — ST → Smartsheet Tasks-KPI sheet.
 Runs every 15 minutes.
-Keeps open tasks (ToDo, InProgress, Open).
-Removes completed tasks older than TASKS_RETENTION_DAYS.
+Keeps only active tasks: Pending, InProgress (and Open/ToDo from ST).
+Deletes rows when status transitions to Completed or Canceled.
 """
 
 import logging
@@ -10,29 +10,12 @@ import time
 from datetime import datetime, timezone, timedelta
 
 from . import st_api, smartsheet_client as ss
-from .config import TASKS_SHEET_ID, TASKS_COLS, SYNC_INTERVALS, TASKS_RETENTION_DAYS
+from .config import TASKS_SHEET_ID, TASKS_COLS, SYNC_INTERVALS
 
 log = logging.getLogger(__name__)
 
 _COL = TASKS_COLS
 _KEY = _COL["task_id"]
-
-_OPEN_STATUSES = {"Open", "ToDo", "InProgress"}
-
-
-def _is_stale_completed(task: dict) -> bool:
-    status = task.get("status", "")
-    if status in _OPEN_STATUSES:
-        return False
-    due_str = task.get("dueDate") or task.get("completedOn") or ""
-    if not due_str:
-        return True  # completed with no date — safe to remove
-    try:
-        dt      = datetime.fromisoformat(due_str.replace("Z", "+00:00"))
-        cutoff  = datetime.now(timezone.utc) - timedelta(days=TASKS_RETENTION_DAYS)
-        return dt < cutoff
-    except Exception:
-        return False
 
 
 def _build_cells(task: dict) -> list:
@@ -78,14 +61,13 @@ def sync_once(*, backfill: bool = False) -> None:
         to_update = []
         to_delete = []
 
-        seen_ids = set()
         for task in tasks:
             task_id = str(task.get("id", ""))
             if not task_id:
                 continue
-            seen_ids.add(task_id)
 
-            if _is_stale_completed(task):
+            # Remove inactive tasks — only active statuses stay in the sheet
+            if task.get("status") in ("Completed", "Canceled"):
                 if task_id in existing:
                     to_delete.append(existing[task_id]["_row_id"])
                 continue
@@ -112,7 +94,7 @@ def sync_once(*, backfill: bool = False) -> None:
             log.info("[tasks] updated %d rows", len(to_update))
         if to_delete:
             ss.delete_rows(TASKS_SHEET_ID, to_delete)
-            log.info("[tasks] deleted %d stale-completed rows", len(to_delete))
+            log.info("[tasks] deleted %d inactive rows", len(to_delete))
 
         log.info("[tasks] sync complete")
     except Exception as e:
