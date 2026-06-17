@@ -140,6 +140,24 @@ def get_job(job_id: int) -> dict:
         return {}
 
 
+def fetch_jobs_by_ids(job_ids: list[int]) -> dict[int, dict]:
+    """Fetch a batch of jobs by ID in one API call. Returns {jobId: job_dict}."""
+    if not job_ids:
+        return {}
+    params = {"ids": ",".join(str(i) for i in job_ids), "pageSize": 500}
+    jobs = get_all("jpm", "jobs", params)
+    return {j["id"]: j for j in jobs}
+
+
+def fetch_appointments_by_ids(appt_ids: list[int]) -> dict[int, dict]:
+    """Fetch appointments by ID in one API call. Returns {apptId: appt_dict}."""
+    if not appt_ids:
+        return {}
+    params = {"ids": ",".join(str(i) for i in appt_ids), "pageSize": 500}
+    appts = get_all("jpm", "appointments", params)
+    return {a["id"]: a for a in appts}
+
+
 def get_invoice(invoice_id: int) -> dict:
     try:
         return get("accounting", f"invoices/{invoice_id}")

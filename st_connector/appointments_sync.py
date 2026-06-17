@@ -17,6 +17,10 @@ log = logging.getLogger(__name__)
 _COL = APPT_COLS
 _KEY = _COL["appt_id"]
 
+# appt_id (str) → job_id (int): appointments currently excluded from the sheet.
+# Persists in-memory across sync cycles so we can detect when exclusion lifts.
+_excluded: dict[str, int] = {}
+
 
 def _iso_to_date(iso: str) -> str | None:
     """Extract YYYY-MM-DD from an ISO datetime string."""
@@ -61,6 +65,27 @@ def _is_stale(appt: dict) -> bool:
         return False
 
 
+def _is_excluded(appt: dict, job: dict | None) -> bool:
+    """Return True if this appointment should be excluded from the sheet.
+
+    Excluded when the parent job is Canceled, or when the job's invoice
+    syncStatus is Exported or Bypassed. If job data is unavailable the
+    appointment is included (fail-open).
+    """
+    if job is None:
+        return False
+    if job.get("status") == "Canceled":
+        return True
+    # The ST jobs API may return a nested invoice object with syncStatus.
+    # If job["invoice"] is absent, we cannot check invoice status here.
+    # TODO: if the jobs endpoint does not include invoice.syncStatus, add a
+    #       fetch_invoices_for_jobs() helper in st_api.py and call it here.
+    inv = job.get("invoice") or {}
+    if inv.get("syncStatus") in ("Exported", "Bypassed"):
+        return True
+    return False
+
+
 def sync_once(*, backfill: bool = False) -> None:
     log.info("[appointments] sync start%s", " (backfill)" if backfill else "")
     try:
@@ -84,6 +109,12 @@ def sync_once(*, backfill: bool = False) -> None:
         )
         log.info("[appointments] fetched %d from ST", len(appts))
 
+        # Batch-fetch parent jobs so exclusion rules can be checked without
+        # one API call per appointment.
+        job_ids = list({a["jobId"] for a in appts if a.get("jobId")})
+        job_map = st_api.fetch_jobs_by_ids(job_ids) if job_ids else {}
+        log.debug("[appointments] fetched %d parent jobs for exclusion check", len(job_map))
+
         to_add    = []
         to_update = []
         to_delete = []
@@ -95,10 +126,25 @@ def sync_once(*, backfill: bool = False) -> None:
                 continue
             st_ids_seen.add(appt_id)
 
+            job_id = appt.get("jobId")
+            job    = job_map.get(job_id) if job_id else None
+
             if _is_stale(appt):
                 if appt_id in existing:
                     to_delete.append(existing[appt_id]["_row_id"])
+                _excluded.pop(appt_id, None)
                 continue
+
+            if _is_excluded(appt, job):
+                if appt_id in existing:
+                    to_delete.append(existing[appt_id]["_row_id"])
+                if job_id:
+                    _excluded[appt_id] = job_id
+                log.debug("[appointments] excluded appt %s (job %s)", appt_id, job_id)
+                continue
+            else:
+                # Exclusion may have been lifted — remove from tracking if present.
+                _excluded.pop(appt_id, None)
 
             cells = _build_cells(appt)
 
@@ -114,6 +160,41 @@ def sync_once(*, backfill: bool = False) -> None:
             else:
                 to_add.append({"cells": cells, "toBottom": True})
 
+        # --- Restoration pass ---
+        # Re-check excluded appointments that were NOT seen in this sync cycle.
+        # We only act when the parent job has been modified recently, keeping
+        # this lightweight (one batch job fetch, one batch appointment fetch).
+        candidates = {
+            aid: jid for aid, jid in _excluded.items()
+            if aid not in st_ids_seen
+        }
+        if candidates:
+            candidate_job_ids = list(set(candidates.values()))
+            candidate_jobs = st_api.fetch_jobs_by_ids(candidate_job_ids)
+
+            # Filter to jobs modified since our last window (re-check all on backfill).
+            recently_modified: set[int] = set()
+            for jid, job in candidate_jobs.items():
+                job_modified = job.get("modifiedOn", "")
+                if not modified_after or job_modified >= modified_after:
+                    recently_modified.add(jid)
+
+            appt_ids_to_recheck = [
+                int(aid) for aid, jid in candidates.items()
+                if jid in recently_modified
+            ]
+            if appt_ids_to_recheck:
+                rechecked = st_api.fetch_appointments_by_ids(appt_ids_to_recheck)
+                for appt_id_int, appt in rechecked.items():
+                    str_aid = str(appt_id_int)
+                    jid = candidates.get(str_aid)
+                    job = candidate_jobs.get(jid)
+                    if not _is_excluded(appt, job) and not _is_stale(appt):
+                        if str_aid not in existing:
+                            to_add.append({"cells": _build_cells(appt), "toBottom": True})
+                        _excluded.pop(str_aid, None)
+                        log.info("[appointments] restored appt %s (exclusion lifted)", str_aid)
+
         # Rows in sheet but not seen from ST at all — leave them unless stale
         # (ST may stop returning very old appointments; don't delete unless confirmed stale)
 
@@ -125,7 +206,7 @@ def sync_once(*, backfill: bool = False) -> None:
             log.info("[appointments] updated %d rows", len(to_update))
         if to_delete:
             ss.delete_rows(APPT_SHEET_ID, to_delete)
-            log.info("[appointments] deleted %d stale rows", len(to_delete))
+            log.info("[appointments] deleted %d rows (stale or excluded)", len(to_delete))
 
         log.info("[appointments] sync complete")
     except Exception as e:
