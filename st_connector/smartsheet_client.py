@@ -98,6 +98,8 @@ def add_rows(sheet_id: int, rows: list) -> list:
         json=rows,
         timeout=30,
     )
+    if r.is_error:
+        log.error("[smartsheet] %s %s → %s | body: %s", r.request.method, str(r.request.url)[-80:], r.status_code, r.text[:2000])
     r.raise_for_status()
     return [row["id"] for row in r.json().get("result", [])]
 
@@ -114,6 +116,8 @@ def update_rows(sheet_id: int, rows: list) -> None:
         json=rows,
         timeout=30,
     )
+    if r.is_error:
+        log.error("[smartsheet] %s %s → %s | body: %s", r.request.method, str(r.request.url)[-80:], r.status_code, r.text[:2000])
     r.raise_for_status()
 
 

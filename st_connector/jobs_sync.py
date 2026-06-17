@@ -58,7 +58,7 @@ def _build_cells(job: dict, note_suffix: str = "") -> list:
     cells = []
     def _add(key, value):
         col = _col(key)
-        if col:
+        if col and value is not None:
             cells.append(ss.cell(col, value))
 
     _add("job_num",              job.get("number"))
